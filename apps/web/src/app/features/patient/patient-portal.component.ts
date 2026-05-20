@@ -1,5 +1,5 @@
 import { DatePipe } from '@angular/common';
-import { Component, OnInit, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
@@ -31,6 +31,14 @@ interface ChatMessage {
   createdAt?: string;
 }
 
+interface NotificationItem {
+  _id: string;
+  type: string;
+  message: string;
+  readAt?: string;
+  createdAt?: string;
+}
+
 @Component({
   standalone: true,
   imports: [DatePipe, ReactiveFormsModule],
@@ -46,6 +54,23 @@ interface ChatMessage {
           El chat no debe usarse para emergencias psicologicas o crisis. Si estas en riesgo, contacta servicios de emergencia.
         </div>
       </section>
+
+      @if (notifications().length) {
+        <section class="notification-strip" aria-label="Notificaciones">
+          <div>
+            <span class="status-pill">Notificaciones</span>
+            <strong>{{ unreadNotificationsCount() }} nuevas</strong>
+          </div>
+          <div class="notification-list">
+            @for (notification of notifications().slice(0, 3); track notification._id) {
+              <article [class.unread]="!notification.readAt">
+                <p>{{ notification.message }}</p>
+                <small>{{ notificationDateLabel(notification.createdAt) }}</small>
+              </article>
+            }
+          </div>
+        </section>
+      }
 
       <section class="layout">
         <article class="card booking-panel" [class.closed]="!bookingOpen()">
@@ -302,6 +327,56 @@ interface ChatMessage {
         grid-template-columns: 1.1fr 0.9fr;
         gap: 18px;
         align-items: start;
+      }
+
+      .notification-strip {
+        display: grid;
+        grid-template-columns: minmax(180px, 240px) 1fr;
+        gap: 14px;
+        align-items: start;
+        margin-bottom: 18px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px;
+        background: var(--white);
+      }
+
+      .notification-strip > div:first-child {
+        display: grid;
+        gap: 8px;
+      }
+
+      .notification-strip strong {
+        color: #3e3439;
+        font-size: 20px;
+      }
+
+      .notification-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .notification-list article {
+        border-radius: 8px;
+        padding: 12px;
+        background: var(--gray-50);
+      }
+
+      .notification-list article.unread {
+        border-left: 4px solid #8d3159;
+        background: #fff7fa;
+      }
+
+      .notification-list p {
+        margin: 0 0 6px;
+        color: var(--text);
+        font-weight: 800;
+        line-height: 1.4;
+      }
+
+      .notification-list small {
+        color: var(--muted);
+        font-weight: 700;
       }
 
       .bottom {
@@ -796,6 +871,7 @@ interface ChatMessage {
       @media (max-width: 980px) {
         .welcome,
         .layout,
+        .notification-strip,
         .compose {
           grid-template-columns: 1fr;
         }
@@ -818,7 +894,7 @@ interface ChatMessage {
     `,
   ],
 })
-export class PatientPortalComponent implements OnInit {
+export class PatientPortalComponent implements OnInit, OnDestroy {
   readonly slots = signal<Slot[]>([]);
   readonly loadingSlots = signal(false);
   readonly availableDayKeys = signal<Set<string>>(new Set());
@@ -830,6 +906,7 @@ export class PatientPortalComponent implements OnInit {
   readonly messages = signal<ChatMessage[]>([]);
   readonly chatOpen = signal(false);
   readonly suggestions = signal<Suggestion[]>([]);
+  readonly notifications = signal<NotificationItem[]>([]);
   readonly chatStatus = signal('');
   readonly chatError = signal(false);
   readonly suggestionStatus = signal('');
@@ -840,6 +917,7 @@ export class PatientPortalComponent implements OnInit {
   readonly weekdays = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'];
   readonly messageForm = this.fb.group({ content: ['', Validators.required] });
   readonly suggestionForm = this.fb.group({ message: ['', Validators.required] });
+  private notificationRefreshId?: ReturnType<typeof setInterval>;
 
   constructor(
     public readonly auth: AuthService,
@@ -851,8 +929,16 @@ export class PatientPortalComponent implements OnInit {
     this.loadAppointments();
     this.loadMessages();
     this.loadSuggestions();
+    this.loadNotifications();
+    this.notificationRefreshId = setInterval(() => this.loadNotifications(), 30000);
     this.loadMonthAvailability();
     this.loadSlots();
+  }
+
+  ngOnDestroy() {
+    if (this.notificationRefreshId) {
+      clearInterval(this.notificationRefreshId);
+    }
   }
 
   openBooking() {
@@ -997,8 +1083,8 @@ export class PatientPortalComponent implements OnInit {
 
   statusLabel(status: string) {
     const labels: Record<string, string> = {
-      pending: 'Pendiente',
-      confirmed: 'Confirmada',
+      pending: 'Agendada',
+      confirmed: 'Agendada',
       cancelled: 'Cancelada',
       completed: 'Completada',
       no_show: 'No asistio',
@@ -1047,6 +1133,26 @@ export class PatientPortalComponent implements OnInit {
     this.api.get<Suggestion[]>('/suggestions').subscribe({
       next: (suggestions) => this.suggestions.set(suggestions),
       error: () => this.suggestions.set([]),
+    });
+  }
+
+  loadNotifications() {
+    this.api.get<NotificationItem[]>('/notifications').subscribe({
+      next: (notifications) => this.notifications.set(notifications),
+      error: () => this.notifications.set([]),
+    });
+  }
+
+  unreadNotificationsCount() {
+    return this.notifications().filter((notification) => !notification.readAt).length;
+  }
+
+  notificationDateLabel(value?: string) {
+    return (value ? new Date(value) : new Date()).toLocaleString('es-MX', {
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
     });
   }
 

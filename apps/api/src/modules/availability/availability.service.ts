@@ -47,10 +47,12 @@ export class AvailabilityService {
       }
     }
 
+    const now = new Date();
     const availableSlots = slots.filter((slot) => {
       const start = new Date(slot.startAt);
       const end = new Date(slot.endAt);
       return (
+        start > now &&
         start >= from &&
         end <= to &&
         !blocks.some((block) => start < block.endAt && end > block.startAt) &&

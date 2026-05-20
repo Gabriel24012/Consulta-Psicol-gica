@@ -40,8 +40,8 @@ export class AppointmentsService {
       startAt,
       endAt,
       reason: input.reason,
-      status: 'pending',
-      patientConfirmation: 'pending',
+      status: 'confirmed',
+      patientConfirmation: 'yes',
     });
     await this.patientsService.touchBooked(patient.sub);
     await this.notificationsService.create({
@@ -65,6 +65,11 @@ export class AppointmentsService {
 
   listMine(user: AuthUser) {
     return this.appointmentModel.find({ patientId: user.sub }).sort({ startAt: 1 }).exec();
+  }
+
+  async deleteAll() {
+    const result = await this.appointmentModel.deleteMany({}).exec();
+    return { ok: true, deletedCount: result.deletedCount ?? 0 };
   }
 
   async updateStatus(id: string, status: AppointmentStatus) {

@@ -24,4 +24,9 @@ export class CrmController {
   followUp(@Param('id') id: string) {
     return this.crmService.followUp(id);
   }
+
+  @Post('patients/:id/reminder')
+  reminder(@Param('id') id: string) {
+    return this.crmService.sendReminder(id);
+  }
 }

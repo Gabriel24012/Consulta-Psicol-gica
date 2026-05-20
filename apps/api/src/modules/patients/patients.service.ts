@@ -53,8 +53,15 @@ export class PatientsService {
     }
 
     const user = await this.userModel.findById(patientId).lean().exec();
-    const profile = await this.profileModel.findOne({ userId: patientId }).lean().exec();
-    if (!user || !profile) {
+    if (!user) {
+      throw new NotFoundException('Paciente no encontrado.');
+    }
+
+    let profile = await this.profileModel.findOne({ userId: patientId }).lean().exec();
+    if (!profile && viewer.role === 'admin' && user.role === 'patient') {
+      profile = (await this.profileModel.create({ userId: patientId })).toObject();
+    }
+    if (!profile) {
       throw new NotFoundException('Paciente no encontrado.');
     }
 
