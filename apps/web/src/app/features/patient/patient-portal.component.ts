@@ -172,9 +172,10 @@ interface ChatMessage {
       </section>
 
       <section class="layout bottom">
-        <article class="card panel">
-          <h2>Chat privado</h2>
-          <div class="messages">
+        <article class="chat-placeholder">
+          <div class="legacy-chat">
+            <h2>Chat privado</h2>
+            <div class="messages">
             @for (item of chatTimeline(); track item.key) {
               @if (item.type === 'day') {
                 <div class="day-divider">{{ item.label }}</div>
@@ -195,6 +196,7 @@ interface ChatMessage {
           @if (chatStatus()) {
             <p class="form-status" [class.error-status]="chatError()">{{ chatStatus() }}</p>
           }
+          </div>
         </article>
 
         <article class="card panel">
@@ -219,6 +221,51 @@ interface ChatMessage {
         </article>
       </section>
     </main>
+
+    <aside class="chat-dock" [class.open]="chatOpen()">
+      @if (chatOpen()) {
+        <section class="chat-window" aria-label="Chat privado con psicologo">
+          <header class="chat-header">
+            <div>
+              <span class="avatar">Ps</span>
+              <div>
+                <strong>Tu psicologo</strong>
+                <small>Chat privado</small>
+              </div>
+            </div>
+            <button class="dock-icon" type="button" aria-label="Cerrar chat" (click)="chatOpen.set(false)">x</button>
+          </header>
+
+          <div class="messages dock-messages">
+            @for (item of chatTimeline(); track item.key) {
+              @if (item.type === 'day') {
+                <div class="day-divider">{{ item.label }}</div>
+              } @else {
+                <p [class.mine]="item.message.senderId === auth.currentUser()?.sub">
+                  <span>{{ item.message.content }}</span>
+                  <small>{{ messageTimeLabel(item.message.createdAt) }}</small>
+                </p>
+              }
+            } @empty {
+              <p class="muted">Inicia una conversacion privada y no urgente.</p>
+            }
+          </div>
+
+          <form class="compose dock-compose" [formGroup]="messageForm" (ngSubmit)="sendMessage()">
+            <input class="input" formControlName="content" placeholder="Escribe un mensaje">
+            <button class="btn btn-primary" type="submit" [disabled]="messageForm.invalid || sendingMessage()">Enviar</button>
+          </form>
+
+          @if (chatStatus()) {
+            <p class="form-status dock-status" [class.error-status]="chatError()">{{ chatStatus() }}</p>
+          }
+        </section>
+      } @else {
+        <button class="chat-bubble" type="button" aria-label="Abrir chat privado" (click)="chatOpen.set(true)">
+          <span>Chat</span>
+        </button>
+      }
+    </aside>
   `,
   styles: [
     `
@@ -259,6 +306,7 @@ interface ChatMessage {
 
       .bottom {
         margin-top: 18px;
+        grid-template-columns: 1fr;
       }
 
       .panel {
@@ -594,6 +642,11 @@ interface ChatMessage {
         background: var(--pink-bg);
       }
 
+      .chat-placeholder,
+      .legacy-chat {
+        display: none;
+      }
+
       .day-divider {
         justify-self: center;
         border-radius: 999px;
@@ -649,6 +702,97 @@ interface ChatMessage {
         line-height: 1.45;
       }
 
+      .chat-dock {
+        position: fixed;
+        right: 24px;
+        bottom: 24px;
+        z-index: 40;
+      }
+
+      .chat-bubble {
+        min-width: 112px;
+        border: 0;
+        border-radius: 999px;
+        padding: 16px 22px;
+        background: #8d3159;
+        color: var(--white);
+        box-shadow: 0 18px 38px rgba(141, 49, 89, 0.32);
+        cursor: pointer;
+        font-weight: 900;
+      }
+
+      .chat-window {
+        display: grid;
+        grid-template-rows: auto 1fr auto auto;
+        width: min(420px, calc(100vw - 32px));
+        height: min(610px, calc(100vh - 48px));
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--white);
+        box-shadow: 0 24px 70px rgba(80, 62, 72, 0.22);
+      }
+
+      .chat-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+        background: #fffafb;
+      }
+
+      .chat-header > div {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .avatar {
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        border-radius: 999px;
+        background: #fce4ec;
+        color: #8d3159;
+        font-weight: 900;
+      }
+
+      .chat-header small {
+        display: block;
+        color: var(--muted);
+      }
+
+      .dock-icon {
+        width: 34px;
+        height: 34px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: #6b5661;
+        cursor: pointer;
+        font-weight: 900;
+      }
+
+      .dock-messages {
+        min-height: 0;
+        max-height: none;
+        margin: 0;
+        border-radius: 0;
+      }
+
+      .dock-compose {
+        margin: 0;
+        padding: 12px;
+        border-top: 1px solid var(--border);
+        background: #fffafb;
+      }
+
+      .dock-status {
+        margin: 0 12px 12px;
+      }
+
       @media (max-width: 980px) {
         .welcome,
         .layout,
@@ -659,6 +803,16 @@ interface ChatMessage {
         .time-group {
           grid-template-columns: 1fr;
           gap: 8px;
+        }
+
+        .chat-dock {
+          right: 12px;
+          bottom: 12px;
+        }
+
+        .chat-window {
+          width: calc(100vw - 24px);
+          height: min(620px, calc(100vh - 24px));
         }
       }
     `,
@@ -674,6 +828,7 @@ export class PatientPortalComponent implements OnInit {
   readonly bookingOpen = signal(false);
   readonly appointments = signal<Appointment[]>([]);
   readonly messages = signal<ChatMessage[]>([]);
+  readonly chatOpen = signal(false);
   readonly suggestions = signal<Suggestion[]>([]);
   readonly chatStatus = signal('');
   readonly chatError = signal(false);

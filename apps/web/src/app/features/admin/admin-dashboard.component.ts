@@ -48,6 +48,12 @@ interface ChatMessage {
   createdAt?: string;
 }
 
+interface ChatConversation {
+  patientId: string;
+  lastMessageAt?: string;
+  unread?: number;
+}
+
 @Component({
   standalone: true,
   imports: [DatePipe, LowerCasePipe, ReactiveFormsModule],
@@ -208,8 +214,8 @@ interface ChatMessage {
         </article>
 
         <article class="card panel">
-          <h2>Chats privados</h2>
-          <div class="chat-admin">
+          <div class="suggestions-admin compact"></div>
+          <div class="legacy-chat-admin">
             <label class="field">
               <span>Paciente</span>
               <select class="input" [value]="selectedChatPatientId()" (change)="selectChatPatient($any($event.target).value)">
@@ -245,14 +251,14 @@ interface ChatMessage {
             }
           </div>
 
-          <div class="suggestions-admin">
+          <div class="suggestions-admin old-title">
             <h2>Sugerencias</h2>
           </div>
-          <div class="suggestions">
+          <div class="suggestions legacy-suggestions">
             @for (suggestion of suggestions(); track suggestion._id) {
               <div class="suggestion">
                 <p>{{ suggestion.message }}</p>
-                <button class="btn btn-soft" type="button" (click)="closeSuggestion(suggestion._id)">Cerrar</button>
+                <button class="btn btn-soft" type="button" (click)="markSuggestionReviewed(suggestion._id)">Marcar como revisada</button>
               </div>
             } @empty {
               <p class="muted">No hay sugerencias pendientes.</p>
@@ -261,6 +267,130 @@ interface ChatMessage {
         </article>
       </section>
     </main>
+
+    <aside class="chat-dock" [class.open]="chatOpen()">
+      @if (chatOpen()) {
+        <section class="chat-window admin-chat-window" aria-label="Mensajes privados">
+          <header class="chat-header">
+            <div>
+              <span class="avatar">Ps</span>
+              <div>
+                <strong>Mensajes</strong>
+                <small>{{ chatInbox().length }} conversaciones</small>
+              </div>
+            </div>
+            <button class="dock-icon" type="button" aria-label="Cerrar chat" (click)="chatOpen.set(false)">x</button>
+          </header>
+
+          <div class="chat-body">
+            <nav class="conversation-list" aria-label="Conversaciones con pacientes">
+              @for (item of chatInbox(); track item.patient._id) {
+                <button
+                  type="button"
+                  [class.active]="item.patient._id === selectedChatPatientId()"
+                  [class.has-unread]="item.unread > 0"
+                  (click)="selectChatPatient(item.patient._id)"
+                >
+                  <span class="conversation-avatar">{{ initials(item.patient.name) }}</span>
+                  <span>
+                    <strong>{{ item.patient.name }}</strong>
+                    <small>{{ item.lastMessageAt ? messageDayLabel(item.lastMessageAt) : item.patient.email }}</small>
+                  </span>
+                  @if (item.unread > 0) {
+                    <b>{{ item.unread }}</b>
+                  }
+                </button>
+              } @empty {
+                <p class="chat-empty">Aun no hay conversaciones con pacientes.</p>
+              }
+            </nav>
+
+            <section class="thread-panel">
+              <div class="thread-title">
+                <div>
+                  <strong>{{ selectedPatientName() }}</strong>
+                  <small>Chat privado</small>
+                </div>
+              </div>
+
+              <div class="admin-messages">
+                @for (item of chatTimeline(); track item.key) {
+                  @if (item.type === 'day') {
+                    <div class="day-divider">{{ item.label }}</div>
+                  } @else {
+                    <p [class.mine]="item.message.senderId === currentAdminId()">
+                      <span>{{ item.message.content }}</span>
+                      <small>{{ messageTimeLabel(item.message.createdAt) }}</small>
+                    </p>
+                  }
+                } @empty {
+                  <p class="muted">Selecciona un paciente para ver o responder su conversacion.</p>
+                }
+              </div>
+
+              <form class="compose-admin" [formGroup]="chatForm" (ngSubmit)="sendAdminMessage()">
+                <input class="input" formControlName="content" placeholder="Responder al paciente">
+                <button class="btn btn-primary" type="submit" [disabled]="!selectedChatPatientId() || chatForm.invalid">Enviar</button>
+              </form>
+
+              @if (chatStatus()) {
+                <p class="save-message" [class.error-message]="chatError()">{{ chatStatus() }}</p>
+              }
+            </section>
+          </div>
+        </section>
+      } @else {
+        <button class="chat-bubble" type="button" aria-label="Abrir mensajes" (click)="openChatDock()">
+          <span>Mensajes</span>
+          @if (totalUnread() > 0) {
+            <b>{{ totalUnread() }}</b>
+          }
+        </button>
+      }
+    </aside>
+
+    <aside class="suggestions-dock" [class.open]="suggestionsOpen()">
+      @if (suggestionsOpen()) {
+        <section class="suggestions-window" aria-label="Sugerencias recibidas">
+          <header class="chat-header">
+            <div>
+              <span class="avatar">Sg</span>
+              <div>
+                <strong>Sugerencias recibidas</strong>
+                <small>{{ suggestions().length }} en bandeja</small>
+              </div>
+            </div>
+            <button class="dock-icon" type="button" aria-label="Cerrar sugerencias" (click)="suggestionsOpen.set(false)">x</button>
+          </header>
+
+          <div class="suggestions-tray">
+            @for (suggestion of suggestions(); track suggestion._id) {
+              <article class="suggestion-card" [class.new]="suggestion.status === 'new'">
+                <div>
+                  <span class="status-pill">{{ suggestionStatusLabel(suggestion.status) }}</span>
+                  @if (suggestion.patientId?.name) {
+                    <small>{{ suggestion.patientId?.name }}</small>
+                  }
+                </div>
+                <p>{{ suggestion.message }}</p>
+                @if (suggestion.status !== 'reviewed' && suggestion.status !== 'answered') {
+                  <button class="btn btn-soft" type="button" (click)="markSuggestionReviewed(suggestion._id)">Marcar como revisada</button>
+                }
+              </article>
+            } @empty {
+              <p class="chat-empty">No hay sugerencias pendientes.</p>
+            }
+          </div>
+        </section>
+      } @else {
+        <button class="suggestions-bubble" type="button" aria-label="Abrir sugerencias recibidas" (click)="suggestionsOpen.set(true)">
+          <span>Sugerencias recibidas</span>
+          @if (newSuggestionsCount() > 0) {
+            <b>{{ newSuggestionsCount() }}</b>
+          }
+        </button>
+      }
+    </aside>
   `,
   styles: [
     `
@@ -530,6 +660,13 @@ interface ChatMessage {
         gap: 12px;
       }
 
+      .legacy-chat-admin,
+      .old-title,
+      .legacy-suggestions,
+      .suggestions-admin.compact {
+        display: none;
+      }
+
       .admin-messages {
         min-height: 220px;
         max-height: 320px;
@@ -583,6 +720,250 @@ interface ChatMessage {
         border-top: 1px solid var(--border);
       }
 
+      .suggestions-admin.compact {
+        margin-top: 0;
+        padding-top: 0;
+        border-top: 0;
+      }
+
+      .chat-dock {
+        position: fixed;
+        right: 24px;
+        bottom: 24px;
+        z-index: 40;
+      }
+
+      .suggestions-dock {
+        position: fixed;
+        right: 24px;
+        bottom: 92px;
+        z-index: 39;
+      }
+
+      .chat-bubble,
+      .suggestions-bubble {
+        position: relative;
+        border: 0;
+        border-radius: 999px;
+        padding: 16px 22px;
+        color: var(--white);
+        cursor: pointer;
+        font-weight: 900;
+      }
+
+      .chat-bubble {
+        min-width: 150px;
+        background: #8d3159;
+        box-shadow: 0 18px 38px rgba(141, 49, 89, 0.32);
+      }
+
+      .suggestions-bubble {
+        min-width: 218px;
+        background: #6f4a7d;
+        box-shadow: 0 18px 38px rgba(111, 74, 125, 0.28);
+      }
+
+      .chat-bubble b,
+      .suggestions-bubble b {
+        position: absolute;
+        top: -7px;
+        right: -4px;
+        display: grid;
+        place-items: center;
+        min-width: 26px;
+        height: 26px;
+        border: 2px solid var(--white);
+        border-radius: 999px;
+        background: #2d8f63;
+        color: var(--white);
+        font-size: 12px;
+      }
+
+      .chat-window {
+        width: min(720px, calc(100vw - 32px));
+        height: min(640px, calc(100vh - 48px));
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--white);
+        box-shadow: 0 24px 70px rgba(80, 62, 72, 0.22);
+      }
+
+      .suggestions-window {
+        width: min(420px, calc(100vw - 32px));
+        max-height: min(560px, calc(100vh - 120px));
+        overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--white);
+        box-shadow: 0 24px 70px rgba(80, 62, 72, 0.22);
+      }
+
+      .chat-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border);
+        background: #fffafb;
+      }
+
+      .chat-header > div,
+      .thread-title,
+      .conversation-list button {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .avatar,
+      .conversation-avatar {
+        display: grid;
+        place-items: center;
+        width: 38px;
+        height: 38px;
+        flex: 0 0 38px;
+        border-radius: 999px;
+        background: #fce4ec;
+        color: #8d3159;
+        font-weight: 900;
+      }
+
+      .chat-header small,
+      .thread-title small,
+      .conversation-list small {
+        color: var(--muted);
+      }
+
+      .dock-icon {
+        width: 34px;
+        height: 34px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: #6b5661;
+        cursor: pointer;
+        font-weight: 900;
+      }
+
+      .chat-body {
+        display: grid;
+        grid-template-columns: 260px 1fr;
+        height: calc(100% - 67px);
+      }
+
+      .conversation-list {
+        overflow: auto;
+        border-right: 1px solid var(--border);
+        background: #fff7fa;
+      }
+
+      .conversation-list button {
+        position: relative;
+        width: 100%;
+        border: 0;
+        border-bottom: 1px solid var(--border);
+        padding: 13px;
+        background: transparent;
+        color: var(--text);
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .conversation-list button.active,
+      .conversation-list button:hover {
+        background: var(--white);
+      }
+
+      .conversation-list button.has-unread strong {
+        color: #8d3159;
+      }
+
+      .conversation-list b {
+        margin-left: auto;
+        min-width: 23px;
+        border-radius: 999px;
+        padding: 3px 7px;
+        background: #2d8f63;
+        color: var(--white);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      .conversation-list span:nth-child(2) {
+        display: grid;
+        min-width: 0;
+      }
+
+      .conversation-list small {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .thread-panel {
+        display: grid;
+        grid-template-rows: auto 1fr auto auto;
+        min-width: 0;
+        padding: 14px;
+      }
+
+      .thread-title {
+        min-height: 42px;
+        padding-bottom: 12px;
+      }
+
+      .chat-empty {
+        margin: 16px;
+        color: var(--muted);
+        line-height: 1.45;
+      }
+
+      .suggestions-tray {
+        display: grid;
+        gap: 12px;
+        max-height: calc(min(560px, calc(100vh - 120px)) - 67px);
+        overflow: auto;
+        padding: 14px;
+        background: #fffafb;
+      }
+
+      .suggestion-card {
+        display: grid;
+        gap: 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 13px;
+        background: var(--white);
+      }
+
+      .suggestion-card.new {
+        border-color: #b98ac8;
+        box-shadow: inset 4px 0 0 #6f4a7d;
+      }
+
+      .suggestion-card > div {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .suggestion-card small {
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .suggestion-card p {
+        margin: 0;
+        color: var(--text);
+        line-height: 1.5;
+      }
+
+      .suggestion-card .btn {
+        justify-self: end;
+      }
+
       @media (max-width: 980px) {
         .metrics,
         .layout,
@@ -603,6 +984,31 @@ interface ChatMessage {
         .appointment select {
           width: 100%;
         }
+
+        .chat-dock {
+          right: 12px;
+          bottom: 12px;
+        }
+
+        .suggestions-dock {
+          right: 12px;
+          bottom: 76px;
+        }
+
+        .chat-window {
+          width: calc(100vw - 24px);
+          height: min(650px, calc(100vh - 24px));
+        }
+
+        .chat-body {
+          grid-template-columns: 1fr;
+        }
+
+        .conversation-list {
+          max-height: 180px;
+          border-right: 0;
+          border-bottom: 1px solid var(--border);
+        }
       }
     `,
   ],
@@ -611,10 +1017,13 @@ export class AdminDashboardComponent implements OnInit {
   readonly summary = signal<CrmSummary | null>(null);
   readonly patients = signal<PatientRow[]>([]);
   readonly appointments = signal<AppointmentRow[]>([]);
-  readonly suggestions = signal<Array<{ _id: string; message: string }>>([]);
+  readonly suggestions = signal<Array<{ _id: string; message: string; status?: string; patientId?: { name?: string; email?: string } }>>([]);
   readonly availabilityRules = signal<AvailabilityRule[]>([]);
+  readonly conversations = signal<ChatConversation[]>([]);
   readonly selectedChatPatientId = signal('');
   readonly chatMessages = signal<ChatMessage[]>([]);
+  readonly chatOpen = signal(false);
+  readonly suggestionsOpen = signal(false);
   readonly currentAdminId = signal('');
   readonly chatStatus = signal('');
   readonly chatError = signal(false);
@@ -649,8 +1058,9 @@ export class AdminDashboardComponent implements OnInit {
     this.loadPatients();
     this.loadAvailabilityRules();
     this.api.get<AppointmentRow[]>('/appointments').subscribe((appointments) => this.appointments.set(appointments));
-    this.api.get<Array<{ _id: string; message: string }>>('/suggestions').subscribe((suggestions) => this.suggestions.set(suggestions));
+    this.loadSuggestions();
     this.api.get<{ sub: string }>('/auth/me').subscribe((user) => this.currentAdminId.set(user.sub));
+    this.loadConversations();
   }
 
   loadPatients() {
@@ -663,6 +1073,41 @@ export class AdminDashboardComponent implements OnInit {
       next: (rules) => this.availabilityRules.set(rules),
       error: () => this.availabilityRules.set([]),
     });
+  }
+
+  loadConversations() {
+    this.api.get<ChatConversation[]>('/conversations/me').subscribe({
+      next: (conversations) => this.conversations.set(conversations),
+      error: () => this.conversations.set([]),
+    });
+  }
+
+  loadSuggestions() {
+    this.api
+      .get<Array<{ _id: string; message: string; status?: string; patientId?: { name?: string; email?: string } }>>('/suggestions')
+      .subscribe((suggestions) => this.suggestions.set(suggestions));
+  }
+
+  newSuggestionsCount() {
+    return this.suggestions().filter((suggestion) => suggestion.status === 'new').length;
+  }
+
+  suggestionStatusLabel(status = 'new') {
+    const labels: Record<string, string> = {
+      new: 'Nueva',
+      reviewed: 'Revisada',
+      answered: 'Respondida',
+      closed: 'Archivada',
+    };
+    return labels[status] ?? status;
+  }
+
+  openChatDock() {
+    this.chatOpen.set(true);
+    this.loadConversations();
+    if (!this.selectedChatPatientId() && this.chatInbox()[0]) {
+      this.selectChatPatient(this.chatInbox()[0].patient._id);
+    }
   }
 
   selectPatient(patient: PatientRow) {
@@ -682,7 +1127,10 @@ export class AdminDashboardComponent implements OnInit {
 
   loadChat(patientId: string) {
     this.api.get<ChatMessage[]>(`/messages/${patientId}`).subscribe({
-      next: (messages) => this.chatMessages.set(this.normalizeMessages(messages)),
+      next: (messages) => {
+        this.chatMessages.set(this.normalizeMessages(messages));
+        this.loadConversations();
+      },
       error: () => {
         this.chatError.set(true);
         this.chatStatus.set('No se pudo actualizar la conversación. Los mensajes visibles se conservan.');
@@ -692,6 +1140,44 @@ export class AdminDashboardComponent implements OnInit {
 
   selectedChatMessages() {
     return this.chatMessages();
+  }
+
+  chatInbox() {
+    const conversationByPatient = new Map(this.conversations().map((conversation) => [String(conversation.patientId), conversation]));
+    return this.patients()
+      .map((patient) => {
+        const conversation = conversationByPatient.get(patient._id);
+        return {
+          patient,
+          lastMessageAt: conversation?.lastMessageAt,
+          unread: Number(conversation?.unread ?? 0),
+          hasConversation: Boolean(conversation),
+        };
+      })
+      .filter((item) => item.hasConversation)
+      .sort((a, b) => {
+        const unreadDelta = b.unread - a.unread;
+        if (unreadDelta) return unreadDelta;
+        return new Date(b.lastMessageAt ?? 0).getTime() - new Date(a.lastMessageAt ?? 0).getTime();
+      });
+  }
+
+  selectedPatientName() {
+    const patient = this.patients().find((item) => item._id === this.selectedChatPatientId());
+    return patient?.name ?? 'Selecciona un paciente';
+  }
+
+  totalUnread() {
+    return this.conversations().reduce((total, conversation) => total + Number(conversation.unread ?? 0), 0);
+  }
+
+  initials(name: string) {
+    return name
+      .split(' ')
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join('') || 'P';
   }
 
   chatTimeline() {
@@ -724,6 +1210,7 @@ export class AdminDashboardComponent implements OnInit {
         this.chatMessages.update((messages) => this.normalizeMessages([...messages, message]));
         this.chatForm.reset();
         this.chatStatus.set('Mensaje enviado.');
+        this.loadConversations();
       },
       error: () => {
         this.chatError.set(true);
@@ -858,7 +1345,7 @@ export class AdminDashboardComponent implements OnInit {
     return labels[weekday] ?? 'día seleccionado';
   }
 
-  closeSuggestion(id: string) {
-    this.api.patch(`/suggestions/${id}/status`, { status: 'closed' }).subscribe(() => this.refresh());
+  markSuggestionReviewed(id: string) {
+    this.api.patch(`/suggestions/${id}/status`, { status: 'reviewed' }).subscribe(() => this.loadSuggestions());
   }
 }

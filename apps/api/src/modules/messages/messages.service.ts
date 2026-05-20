@@ -23,6 +23,16 @@ export class MessagesService {
       .sort({ createdAt: 1 })
       .lean()
       .exec();
+    await this.messageModel
+      .updateMany(
+        {
+          patientId: new Types.ObjectId(patientId),
+          receiverId: new Types.ObjectId(user.sub),
+          readAt: { $exists: false },
+        },
+        { $set: { readAt: new Date() } },
+      )
+      .exec();
     return messages.map((message) => ({
       ...message,
       _id: message._id.toString(),
@@ -65,9 +75,29 @@ export class MessagesService {
     if (user.role === 'patient') {
       return [{ patientId: user.sub, title: 'Conversación con tu psicólogo' }];
     }
+    const userId = new Types.ObjectId(user.sub);
     const rows = await this.messageModel.aggregate([
       { $sort: { createdAt: -1 } },
-      { $group: { _id: '$patientId', lastMessageAt: { $first: '$createdAt' }, unread: { $sum: { $cond: ['$readAt', 0, 1] } } } },
+      {
+        $group: {
+          _id: '$patientId',
+          lastMessageAt: { $first: '$createdAt' },
+          unread: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ['$receiverId', userId] },
+                    { $not: ['$readAt'] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+        },
+      },
       { $sort: { lastMessageAt: -1 } },
     ]);
     return rows.map((row) => ({ patientId: row._id, lastMessageAt: row.lastMessageAt, unread: row.unread }));
