@@ -5,7 +5,7 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { AppointmentsService } from './appointments.service';
-import { CreateAppointmentDto, RescheduleAppointmentDto, UpdateAppointmentStatusDto } from './dto/appointment.dto';
+import { CreateAdminAppointmentDto, CreateAppointmentDto, RescheduleAppointmentDto, UpdateAppointmentStatusDto } from './dto/appointment.dto';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('appointments')
@@ -34,6 +34,12 @@ export class AppointmentsController {
   @Roles('patient')
   mine(@CurrentUser() user: AuthUser) {
     return this.appointmentsService.listMine(user);
+  }
+
+  @Post('admin/patients/:patientId')
+  @Roles('admin')
+  createForPatient(@Param('patientId') patientId: string, @Body() dto: CreateAdminAppointmentDto) {
+    return this.appointmentsService.createForExistingPatientByAdmin(patientId, dto);
   }
 
   @Patch(':id/status')

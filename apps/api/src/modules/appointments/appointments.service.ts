@@ -83,6 +83,14 @@ export class AppointmentsService {
     return appointment;
   }
 
+  async createForExistingPatientByAdmin(patientId: string, input: { startAt: string; endAt: string; reason?: string }) {
+    const patient = await this.usersService.findById(patientId);
+    if (!patient || patient.role !== 'patient') {
+      throw new NotFoundException('Paciente no encontrado.');
+    }
+    return this.createForPatientByAdmin({ sub: patient._id.toString(), name: patient.name }, input);
+  }
+
   listForUser(user: AuthUser) {
     const filter = user.role === 'admin' ? {} : { patientId: user.sub };
     return this.appointmentModel.find(filter).sort({ startAt: 1 }).populate('patientId', 'name email phone').exec();

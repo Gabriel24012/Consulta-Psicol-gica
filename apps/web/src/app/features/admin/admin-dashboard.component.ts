@@ -475,7 +475,7 @@ interface QuickIntakeResult {
                 <p class="save-message" [class.error-message]="quickIntakeError()">{{ quickIntakeMessage() }}</p>
               }
 
-              <button class="btn btn-primary" type="submit" [disabled]="quickIntakeForm.invalid || quickIntakeSaving()">
+              <button class="btn btn-primary" type="submit" [disabled]="quickIntakeSaving()">
                 {{ quickIntakeSaving() ? 'Creando...' : 'Crear paciente y link' }}
               </button>
             </form>
@@ -613,6 +613,73 @@ interface QuickIntakeResult {
               <strong>{{ patient.profile.totalSessions }}</strong>
             </div>
           </section>
+          <section class="drawer-actions">
+            <button type="button" (click)="openPatientSchedule()">Agendar cita</button>
+          </section>
+          @if (patientSchedulingOpen()) {
+            <section class="admin-reschedule">
+              <div class="mini-calendar">
+                <div class="month-nav">
+                  <button class="dock-icon" type="button" (click)="previousPatientScheduleMonth()" aria-label="Mes anterior">&lsaquo;</button>
+                  <strong>{{ patientScheduleMonthLabel() }}</strong>
+                  <button class="dock-icon" type="button" (click)="nextPatientScheduleMonth()" aria-label="Mes siguiente">&rsaquo;</button>
+                </div>
+                <div class="weekdays">
+                  @for (weekday of weekdays; track weekday) {
+                    <span>{{ weekday }}</span>
+                  }
+                </div>
+                <div class="calendar-grid">
+                  @for (day of patientScheduleCalendarDays(); track day.key) {
+                    <button
+                      type="button"
+                      [class.outside]="!day.inMonth"
+                      [class.today]="day.isToday"
+                      [class.available]="day.available"
+                      [class.selected]="day.key === patientScheduleSelectedDate()"
+                      [disabled]="!day.inMonth || day.isPast"
+                      (click)="selectPatientScheduleDate(day.key)"
+                    >
+                      {{ day.label }}
+                    </button>
+                  }
+                </div>
+              </div>
+
+              <div class="time-section">
+                <h3>Horarios disponibles</h3>
+                @if (patientScheduleSlotsLoading()) {
+                  <p class="empty-state">Buscando horarios disponibles...</p>
+                } @else {
+                  @for (group of groupedPatientScheduleSlots(); track group.label) {
+                    @if (group.slots.length) {
+                      <div class="time-group">
+                        <span>{{ group.label }}</span>
+                        <div>
+                          @for (slot of group.slots; track slot.startAt) {
+                            <button
+                              type="button"
+                              [class.selected-time]="patientScheduleSelectedSlot()?.startAt === slot.startAt"
+                              (click)="patientScheduleSelectedSlot.set(slot)"
+                            >
+                              {{ slot.startAt | date: 'shortTime' }}
+                            </button>
+                          }
+                        </div>
+                      </div>
+                    }
+                  }
+                  @if (!patientScheduleSlots().length) {
+                    <p class="empty-state">No hay horarios disponibles para este dÃ­a.</p>
+                  }
+                }
+              </div>
+
+              <button class="btn btn-primary" type="button" [disabled]="!patientScheduleSelectedSlot() || patientScheduleSaving()" (click)="submitPatientSchedule()">
+                {{ patientScheduleSaving() ? 'Agendando...' : 'Guardar cita' }}
+              </button>
+            </section>
+          }
           @if (isIncompletePatient(patient)) {
             <section class="pending-profile">
               <strong>Perfil pendiente de completar</strong>
@@ -2007,6 +2074,14 @@ export class AdminDashboardComponent implements OnInit {
   readonly selectedRescheduleSlot = signal<Slot | null>(null);
   readonly rescheduleSelectedDate = signal(this.formatDateKey(new Date()));
   readonly rescheduleVisibleMonth = signal(new Date());
+  readonly patientSchedulingOpen = signal(false);
+  readonly patientScheduleSaving = signal(false);
+  readonly patientScheduleSlotsLoading = signal(false);
+  readonly patientScheduleSlots = signal<Slot[]>([]);
+  readonly patientScheduleSelectedSlot = signal<Slot | null>(null);
+  readonly patientScheduleSelectedDate = signal(this.formatDateKey(new Date()));
+  readonly patientScheduleVisibleMonth = signal(new Date());
+  readonly patientScheduleAvailableDayKeys = signal<Set<string>>(new Set());
   readonly weekdays = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'];
 
   readonly search = this.fb.control('');
@@ -2244,11 +2319,18 @@ export class AdminDashboardComponent implements OnInit {
   }
 
   createQuickPatient() {
-    if (this.quickIntakeForm.invalid) return;
     const value = this.quickIntakeForm.getRawValue();
+    const name = value.name?.trim() ?? '';
     const slot = this.quickSelectedSlot();
     this.quickIntakeMessage.set('');
     this.quickIntakeError.set(false);
+
+    if (!name) {
+      this.quickIntakeForm.markAllAsTouched();
+      this.quickIntakeError.set(true);
+      this.quickIntakeMessage.set('Debes llenar los campos para dar de alta al paciente.');
+      return;
+    }
 
     if (value.scheduleNow && !slot) {
       this.quickIntakeError.set(true);
@@ -2257,7 +2339,7 @@ export class AdminDashboardComponent implements OnInit {
     }
 
     const payload = {
-      name: value.name?.trim(),
+      name,
       appointment: value.scheduleNow && slot ? { startAt: slot.startAt, endAt: slot.endAt } : undefined,
     };
     this.quickIntakeSaving.set(true);
@@ -2327,6 +2409,9 @@ export class AdminDashboardComponent implements OnInit {
     if (clearAppointment) {
       this.selectedAppointment.set(null);
     }
+    this.patientSchedulingOpen.set(false);
+    this.patientScheduleSelectedSlot.set(null);
+    this.patientScheduleSlots.set([]);
     const existing = this.patients().find((patient) => patient._id === patientId);
     if (existing) {
       this.selectedPatient.set(existing);
@@ -2354,6 +2439,9 @@ export class AdminDashboardComponent implements OnInit {
     this.reschedulingAppointmentId.set(null);
     this.rescheduleSlots.set([]);
     this.selectedRescheduleSlot.set(null);
+    this.patientSchedulingOpen.set(false);
+    this.patientScheduleSlots.set([]);
+    this.patientScheduleSelectedSlot.set(null);
   }
 
   drawerPatientName() {
@@ -2377,9 +2465,141 @@ export class AdminDashboardComponent implements OnInit {
     });
   }
 
+  openPatientSchedule() {
+    const patient = this.selectedPatient();
+    if (!patient) return;
+    const today = new Date();
+    this.patientSchedulingOpen.set(true);
+    this.patientScheduleVisibleMonth.set(new Date(today.getFullYear(), today.getMonth(), 1));
+    this.patientScheduleSelectedDate.set(this.formatDateKey(today));
+    this.patientScheduleSelectedSlot.set(null);
+    this.drawerMessage.set('');
+    this.drawerError.set(false);
+    this.loadPatientScheduleMonthAvailability();
+    this.loadPatientScheduleSlots();
+  }
+
+  submitPatientSchedule() {
+    const patient = this.selectedPatient();
+    const slot = this.patientScheduleSelectedSlot();
+    if (!patient || !slot) return;
+    this.patientScheduleSaving.set(true);
+    this.drawerMessage.set('');
+    this.drawerError.set(false);
+    this.api
+      .post(`/appointments/admin/patients/${patient._id}`, {
+        startAt: slot.startAt,
+        endAt: slot.endAt,
+      })
+      .subscribe({
+        next: () => {
+          this.patientScheduleSaving.set(false);
+          this.patientSchedulingOpen.set(false);
+          this.patientScheduleSelectedSlot.set(null);
+          this.drawerMessage.set('Cita agendada.');
+          this.refresh();
+        },
+        error: (error) => {
+          this.patientScheduleSaving.set(false);
+          this.drawerError.set(true);
+          this.drawerMessage.set(this.apiErrorMessage(error, 'No se pudo agendar la cita.'));
+        },
+      });
+  }
+
+  selectPatientScheduleDate(date: string) {
+    this.patientScheduleSelectedDate.set(date);
+    this.loadPatientScheduleSlots();
+  }
+
+  previousPatientScheduleMonth() {
+    const current = this.patientScheduleVisibleMonth();
+    this.patientScheduleVisibleMonth.set(new Date(current.getFullYear(), current.getMonth() - 1, 1));
+    this.loadPatientScheduleMonthAvailability();
+  }
+
+  nextPatientScheduleMonth() {
+    const current = this.patientScheduleVisibleMonth();
+    this.patientScheduleVisibleMonth.set(new Date(current.getFullYear(), current.getMonth() + 1, 1));
+    this.loadPatientScheduleMonthAvailability();
+  }
+
+  patientScheduleMonthLabel() {
+    return this.patientScheduleVisibleMonth().toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+  }
+
+  patientScheduleCalendarDays() {
+    const month = this.patientScheduleVisibleMonth();
+    const first = new Date(month.getFullYear(), month.getMonth(), 1);
+    const startOffset = (first.getDay() + 6) % 7;
+    const start = new Date(first);
+    start.setDate(first.getDate() - startOffset);
+    const todayKey = this.formatDateKey(new Date());
+
+    return Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(start);
+      date.setDate(start.getDate() + index);
+      const key = this.formatDateKey(date);
+      return {
+        key,
+        label: date.getDate(),
+        inMonth: date.getMonth() === month.getMonth(),
+        isToday: key === todayKey,
+        isPast: key < todayKey,
+        available: this.patientScheduleAvailableDayKeys().has(key),
+      };
+    });
+  }
+
+  loadPatientScheduleSlots() {
+    const date = this.patientScheduleSelectedDate();
+    const from = new Date(`${date}T00:00:00`);
+    const to = new Date(`${date}T23:59:59`);
+    this.patientScheduleSlotsLoading.set(true);
+    this.patientScheduleSelectedSlot.set(null);
+    this.api.get<Slot[]>(`/availability/slots?from=${from.toISOString()}&to=${to.toISOString()}`).subscribe({
+      next: (slots) => {
+        this.patientScheduleSlots.set(this.uniqueSlots(slots));
+        this.patientScheduleSlotsLoading.set(false);
+      },
+      error: () => {
+        this.patientScheduleSlots.set([]);
+        this.patientScheduleSlotsLoading.set(false);
+      },
+    });
+  }
+
+  loadPatientScheduleMonthAvailability() {
+    const month = this.patientScheduleVisibleMonth();
+    const from = new Date(month.getFullYear(), month.getMonth(), 1, 0, 0, 0);
+    const to = new Date(month.getFullYear(), month.getMonth() + 1, 0, 23, 59, 59);
+    this.api.get<Slot[]>(`/availability/slots?from=${from.toISOString()}&to=${to.toISOString()}`).subscribe({
+      next: (slots) => {
+        this.patientScheduleAvailableDayKeys.set(new Set(this.uniqueSlots(slots).map((slot) => this.formatDateKey(new Date(slot.startAt)))));
+      },
+      error: () => this.patientScheduleAvailableDayKeys.set(new Set()),
+    });
+  }
+
+  groupedPatientScheduleSlots() {
+    return [
+      { label: 'MaÃ±ana', slots: this.patientScheduleSlots().filter((slot) => new Date(slot.startAt).getHours() < 12) },
+      {
+        label: 'MediodÃ­a',
+        slots: this.patientScheduleSlots().filter((slot) => {
+          const hour = new Date(slot.startAt).getHours();
+          return hour >= 12 && hour < 17;
+        }),
+      },
+      { label: 'Tarde', slots: this.patientScheduleSlots().filter((slot) => new Date(slot.startAt).getHours() >= 17) },
+    ];
+  }
+
   openReschedule(appointment: AppointmentRow) {
     this.selectedAppointment.set(appointment);
     this.drawerOpen.set(true);
+    this.patientSchedulingOpen.set(false);
+    this.patientScheduleSelectedSlot.set(null);
     this.reschedulingAppointmentId.set(appointment._id);
     const appointmentDate = new Date(appointment.startAt);
     this.rescheduleVisibleMonth.set(new Date(appointmentDate.getFullYear(), appointmentDate.getMonth(), 1));

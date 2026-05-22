@@ -25,3 +25,5 @@ export class RescheduleAppointmentDto {
   @IsDateString()
   endAt!: string;
 }
+
+export class CreateAdminAppointmentDto extends CreateAppointmentDto {}
