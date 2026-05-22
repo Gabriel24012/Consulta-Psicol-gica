@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
     "dev:api": "npm --workspace apps/api run start:dev",
-    "dev:web": "npx ng serve web --host 0.0.0.0 --port 4200",
+    "dev:web": "npx ng serve web --host 0.0.0.0 --port 4200 --proxy-config apps/web/proxy.conf.json",
     "build": "npm run build:shared && npm run build:api && npm run build:web",
     "build:shared": "npm --workspace packages/shared run build",
     "build:api": "npm --workspace apps/api run build",

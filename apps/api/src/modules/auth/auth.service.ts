@@ -57,9 +57,18 @@ export class AuthService {
     });
   }
 
-  async refresh(userId: string, refreshToken: string) {
-    const current = await this.usersService.findByIdWithRefreshToken(userId);
-    if (!current || !current.refreshTokenHash || !refreshToken) {
+  async refresh(refreshToken: string) {
+    let payload: { sub: string };
+    try {
+      payload = await this.jwt.verifyAsync<{ sub: string }>(refreshToken, {
+        secret: this.config.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      });
+    } catch {
+      throw new UnauthorizedException('Sesion invalida.');
+    }
+
+    const current = await this.usersService.findByIdWithRefreshToken(payload.sub);
+    if (!current || current.status !== 'active' || !current.refreshTokenHash || !refreshToken) {
       throw new UnauthorizedException('Sesión inválida.');
     }
     const ok = await argon2.verify(current.refreshTokenHash, refreshToken);

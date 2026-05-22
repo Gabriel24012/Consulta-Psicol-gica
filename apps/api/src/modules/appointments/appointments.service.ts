@@ -1,9 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Queue } from 'bullmq';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { AppointmentStatus, AuthUser } from '@itzel/shared';
 import { AvailabilityService } from '../availability/availability.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -14,6 +14,8 @@ import { Appointment } from './schemas/appointment.schema';
 
 @Injectable()
 export class AppointmentsService {
+  private readonly logger = new Logger(AppointmentsService.name);
+
   constructor(
     @InjectModel(Appointment.name) private readonly appointmentModel: Model<Appointment>,
     @InjectQueue('appointments') private readonly appointmentsQueue: Queue,
@@ -29,42 +31,24 @@ export class AppointmentsService {
     const psychologist = await this.usersService.findAdmin();
     const startAt = new Date(input.startAt);
     const endAt = new Date(input.endAt);
-    if (startAt >= endAt) {
-      throw new BadRequestException('La hora de inicio debe ser anterior a la hora final.');
+    if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || startAt >= endAt) {
+      throw new BadRequestException('Rango de fechas invalido.');
     }
 
-    const available = await this.availabilityService.isSlotAvailable(psychologist._id, startAt, endAt);
+    const available = await this.availabilityService.isSlotBookable(psychologist._id, startAt, endAt);
     if (!available) {
-      throw new BadRequestException('Ese horario ya no está disponible.');
+      throw new BadRequestException('Ese horario ya no esta disponible.');
     }
 
-    const appointment = await this.appointmentModel.create({
-      patientId: patient.sub,
-      psychologistId: psychologist._id,
-      startAt,
-      endAt,
-      reason: input.reason,
-      status: 'confirmed',
-      patientConfirmation: 'yes',
-    });
+    const appointment = await this.createAppointmentOrConflict(patient, psychologist._id, startAt, endAt, input.reason);
     await this.patientsService.touchBooked(patient.sub);
     await this.notificationsService.create({
       userId: psychologist._id.toString(),
       type: 'appointment',
-      message: `${patient.name} agendó una sesión para ${startAt.toLocaleString('es-MX')}.`,
+      message: `${patient.name} agendo una sesion para ${startAt.toLocaleString('es-MX')}.`,
       metadata: { appointmentId: appointment._id },
     });
-    await this.appointmentsQueue.add(
-      'appointment-reminder',
-      { appointmentId: appointment._id.toString() },
-      {
-        delay: Math.max(startAt.getTime() - Date.now() - 24 * 60 * 60 * 1000, 0),
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 60_000 },
-        jobId: `appointment-reminder:${appointment._id.toString()}`,
-        removeOnComplete: true,
-      },
-    );
+    await this.scheduleReminder(appointment._id.toString(), startAt);
     return appointment;
   }
 
@@ -78,6 +62,11 @@ export class AppointmentsService {
   }
 
   async deleteAll() {
+    const allowDeleteAll = this.config.get<string>('ALLOW_APPOINTMENT_DELETE_ALL') === 'true';
+    const isProduction = this.config.get<string>('NODE_ENV') === 'production';
+    if (isProduction && !allowDeleteAll) {
+      throw new ForbiddenException('El borrado masivo de citas solo esta disponible cuando ALLOW_APPOINTMENT_DELETE_ALL=true.');
+    }
     const result = await this.appointmentModel.deleteMany({}).exec();
     return { ok: true, deletedCount: result.deletedCount ?? 0 };
   }
@@ -111,13 +100,16 @@ export class AppointmentsService {
     if (user.role === 'patient' && oldAppointment.patientId.toString() !== user.sub) {
       throw new ForbiddenException('No puedes reprogramar una cita de otro paciente.');
     }
-    await this.cancel(id, user);
     const newAppointment = await this.create(
       { ...user, sub: oldAppointment.patientId.toString() },
       { ...input, reason: oldAppointment.reason },
     );
     newAppointment.rescheduledFrom = oldAppointment._id;
-    return newAppointment.save();
+    await newAppointment.save();
+    oldAppointment.status = 'cancelled';
+    oldAppointment.cancelledAt = new Date();
+    await oldAppointment.save();
+    return newAppointment;
   }
 
   findById(id: string) {
@@ -215,5 +207,52 @@ export class AppointmentsService {
       location,
       previewBody,
     };
+  }
+
+  private async createAppointmentOrConflict(
+    patient: AuthUser,
+    psychologistId: Types.ObjectId,
+    startAt: Date,
+    endAt: Date,
+    reason?: string,
+  ) {
+    try {
+      return await this.appointmentModel.create({
+        patientId: patient.sub,
+        psychologistId,
+        startAt,
+        endAt,
+        reason,
+        status: 'confirmed',
+        patientConfirmation: 'yes',
+      });
+    } catch (error) {
+      if (this.isDuplicateKeyError(error)) {
+        throw new ConflictException('Ese horario acaba de ser reservado. Elige otro horario disponible.');
+      }
+      throw error;
+    }
+  }
+
+  private isDuplicateKeyError(error: unknown) {
+    return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 11000);
+  }
+
+  private async scheduleReminder(appointmentId: string, startAt: Date) {
+    try {
+      await this.appointmentsQueue.add(
+        'appointment-reminder',
+        { appointmentId },
+        {
+          delay: Math.max(startAt.getTime() - Date.now() - 24 * 60 * 60 * 1000, 0),
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 60_000 },
+          jobId: `appointment-reminder-${appointmentId}`,
+          removeOnComplete: true,
+        },
+      );
+    } catch (error) {
+      this.logger.error(`No se pudo programar recordatorio para cita ${appointmentId}`, error);
+    }
   }
 }

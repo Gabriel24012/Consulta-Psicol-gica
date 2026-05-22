@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
@@ -7,8 +7,11 @@ export class FieldCryptoService {
   private readonly key: Buffer;
 
   constructor(config: ConfigService) {
-    const raw = config.get<string>('FIELD_ENCRYPTION_KEY') ?? 'development-only-change-this-key';
-    this.key = createHash('sha256').update(raw).digest();
+    const raw = config.get<string>('FIELD_ENCRYPTION_KEY');
+    if (!raw && config.get<string>('NODE_ENV') === 'production') {
+      throw new InternalServerErrorException('FIELD_ENCRYPTION_KEY es obligatoria en produccion.');
+    }
+    this.key = createHash('sha256').update(raw ?? 'development-only-change-this-key').digest();
   }
 
   encrypt(value: string): string {

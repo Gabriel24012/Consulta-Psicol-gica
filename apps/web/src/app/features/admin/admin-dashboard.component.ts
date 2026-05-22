@@ -1366,6 +1366,8 @@ interface InactivePatient {
         right: 24px;
         bottom: 24px;
         z-index: 40;
+        max-width: calc(100vw - 32px);
+        max-height: calc(100dvh - 48px);
       }
 
       .suggestions-dock {
@@ -1423,7 +1425,9 @@ interface InactivePatient {
 
       .chat-window {
         width: min(760px, calc(100vw - 32px));
-        height: min(640px, calc(100vh - 48px));
+        height: min(640px, calc(100dvh - 48px));
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
       }
 
       .suggestions-window {
@@ -1462,11 +1466,12 @@ interface InactivePatient {
       .chat-body {
         display: grid;
         grid-template-columns: 260px 1fr;
-        height: calc(100% - 67px);
+        min-height: 0;
       }
 
       .conversation-list {
         overflow: auto;
+        min-height: 0;
         border-right: 1px solid var(--border);
         background: #fff7fa;
       }
@@ -1514,6 +1519,7 @@ interface InactivePatient {
         display: grid;
         grid-template-rows: auto 1fr auto auto;
         min-width: 0;
+        min-height: 0;
         padding: 14px;
       }
 
@@ -1521,8 +1527,9 @@ interface InactivePatient {
         display: grid;
         align-content: start;
         gap: 10px;
-        min-height: 220px;
+        min-height: 0;
         overflow: auto;
+        overscroll-behavior: contain;
         padding: 12px;
         border-radius: 8px;
         background: var(--gray-50);
@@ -1537,6 +1544,7 @@ interface InactivePatient {
         padding: 10px 12px;
         border-radius: 8px;
         background: var(--white);
+        overflow-wrap: anywhere;
       }
 
       .admin-messages .mine {
@@ -1697,15 +1705,16 @@ interface InactivePatient {
 
         .chat-window {
           width: calc(100vw - 24px);
-          height: min(650px, calc(100vh - 24px));
+          height: min(650px, calc(100dvh - 24px));
         }
 
         .chat-body {
           grid-template-columns: 1fr;
+          grid-template-rows: auto minmax(0, 1fr);
         }
 
         .conversation-list {
-          max-height: 180px;
+          max-height: 150px;
           border-right: 0;
           border-bottom: 1px solid var(--border);
         }

@@ -6,6 +6,12 @@ import { AuthUser } from '@itzel/shared';
 import { AuthService } from './auth.service';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
 
+interface AuthResult {
+  accessToken: string;
+  refreshToken: string;
+  user: AuthUser;
+}
+
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
@@ -14,23 +20,22 @@ export class AuthController {
   async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) response: Response) {
     const result = await this.authService.register(dto);
     this.setCookies(response, result.accessToken, result.refreshToken);
-    return result;
+    return this.toSession(result);
   }
 
   @Post('login')
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) response: Response) {
     const result = await this.authService.login(dto);
     this.setCookies(response, result.accessToken, result.refreshToken);
-    return result;
+    return this.toSession(result);
   }
 
   @Post('refresh')
   async refresh(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
     const refreshToken = request.cookies?.refreshToken ?? request.body?.refreshToken;
-    const userId = request.body?.userId;
-    const result = await this.authService.refresh(userId, refreshToken);
+    const result = await this.authService.refresh(refreshToken);
     this.setCookies(response, result.accessToken, result.refreshToken);
-    return result;
+    return this.toSession(result);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -61,5 +66,9 @@ export class AuthController {
       sameSite: 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
+  }
+
+  private toSession(result: AuthResult) {
+    return { user: result.user };
   }
 }

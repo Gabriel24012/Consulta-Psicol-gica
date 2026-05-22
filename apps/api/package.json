@@ -9,7 +9,7 @@
     "reset:admin-password": "ts-node src/scripts/reset-admin-password.ts",
     "build": "nest build",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "jest --passWithNoTests"
+    "test": "jest --config jest.config.js --passWithNoTests"
   },
   "dependencies": {
     "@nestjs/bullmq": "^10.2.3",
