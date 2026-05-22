@@ -12,6 +12,6 @@ export class AppointmentsProcessor extends WorkerHost {
     if (job.name !== 'appointment-reminder') {
       return;
     }
-    await this.appointmentsService.markReminderSent(job.data.appointmentId);
+    await this.appointmentsService.sendAppointmentReminder(job.data.appointmentId);
   }
 }

@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Queue } from 'bullmq';
 import { Model } from 'mongoose';
@@ -8,6 +9,7 @@ import { AvailabilityService } from '../availability/availability.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { PatientsService } from '../patients/patients.service';
 import { UsersService } from '../users/users.service';
+import { WhatsappService } from '../whatsapp/whatsapp.service';
 import { Appointment } from './schemas/appointment.schema';
 
 @Injectable()
@@ -19,6 +21,8 @@ export class AppointmentsService {
     private readonly patientsService: PatientsService,
     private readonly availabilityService: AvailabilityService,
     private readonly notificationsService: NotificationsService,
+    private readonly whatsappService: WhatsappService,
+    private readonly config: ConfigService,
   ) {}
 
   async create(patient: AuthUser, input: { startAt: string; endAt: string; reason?: string }) {
@@ -53,7 +57,13 @@ export class AppointmentsService {
     await this.appointmentsQueue.add(
       'appointment-reminder',
       { appointmentId: appointment._id.toString() },
-      { delay: Math.max(startAt.getTime() - Date.now() - 24 * 60 * 60 * 1000, 0) },
+      {
+        delay: Math.max(startAt.getTime() - Date.now() - 24 * 60 * 60 * 1000, 0),
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 60_000 },
+        jobId: `appointment-reminder:${appointment._id.toString()}`,
+        removeOnComplete: true,
+      },
     );
     return appointment;
   }
@@ -116,5 +126,94 @@ export class AppointmentsService {
 
   markReminderSent(id: string) {
     return this.appointmentModel.findByIdAndUpdate(id, { reminderSentAt: new Date() }).exec();
+  }
+
+  async sendAppointmentReminder(id: string) {
+    const appointment = await this.appointmentModel
+      .findById(id)
+      .populate('patientId', 'name phone')
+      .populate('psychologistId', 'name')
+      .exec();
+
+    if (!appointment) {
+      return { ok: false, skipped: 'not_found' };
+    }
+    if (appointment.reminderSentAt) {
+      return { ok: true, skipped: 'already_sent' };
+    }
+    if (!['pending', 'confirmed'].includes(appointment.status)) {
+      return { ok: true, skipped: `status_${appointment.status}` };
+    }
+    if (appointment.startAt.getTime() <= Date.now()) {
+      return { ok: true, skipped: 'appointment_started' };
+    }
+
+    const patient = appointment.patientId as unknown as { _id?: unknown; name?: string; phone?: string };
+    const psychologist = appointment.psychologistId as unknown as { name?: string };
+    const patientPhone = patient.phone?.trim();
+    if (!patientPhone) {
+      const admin = await this.usersService.findAdmin();
+      await this.notificationsService.create({
+        userId: admin._id.toString(),
+        type: 'appointment',
+        message: `No se pudo enviar recordatorio de cita a ${patient.name ?? 'Paciente'} porque no tiene telefono registrado.`,
+        metadata: { appointmentId: appointment._id.toString(), channel: 'whatsapp', skipped: 'missing_phone' },
+      });
+      return { ok: false, skipped: 'missing_phone' };
+    }
+
+    const reminder = this.buildReminderMessage({
+      patientName: patient.name ?? 'Paciente',
+      psychologistName: psychologist.name ?? 'tu psicologo',
+      startAt: appointment.startAt,
+      endAt: appointment.endAt,
+    });
+
+    const result = await this.whatsappService.sendAppointmentReminder(patientPhone, reminder);
+    await this.markReminderSent(id);
+    await this.notificationsService.create({
+      userId: patient._id?.toString() ?? appointment.patientId.toString(),
+      type: 'appointment',
+      message: 'Te enviamos un recordatorio por WhatsApp para confirmar tu asistencia a la sesion.',
+      metadata: { appointmentId: appointment._id.toString(), channel: 'whatsapp' },
+    });
+    return { ok: true, result };
+  }
+
+  private buildReminderMessage(input: { patientName: string; psychologistName: string; startAt: Date; endAt: Date }) {
+    const timeZone = this.config.get<string>('APPOINTMENT_TIMEZONE', 'America/Mexico_City');
+    const location = this.config.get<string>('APPOINTMENT_LOCATION', 'ubicacion del consultorio por confirmar');
+    const dateLabel = new Intl.DateTimeFormat('es-MX', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      timeZone,
+    }).format(input.startAt);
+    const timeFormatter = new Intl.DateTimeFormat('es-MX', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone,
+    });
+
+    const timeLabel = `${timeFormatter.format(input.startAt)} - ${timeFormatter.format(input.endAt)}`;
+    const previewBody = [
+      `Hola ${input.patientName}.`,
+      `Te recordamos tu cita de psicologia con ${input.psychologistName}.`,
+      `Fecha: ${dateLabel}.`,
+      `Hora: ${timeLabel}.`,
+      `Ubicacion: ${location}.`,
+      'Por favor confirma tu asistencia respondiendo a este mensaje.',
+      'Si no puedes asistir, avisanos lo antes posible para que alguien mas pueda ocupar el lugar.',
+    ].join('\n');
+
+    return {
+      patientName: input.patientName,
+      psychologistName: input.psychologistName,
+      date: dateLabel,
+      time: timeLabel,
+      location,
+      previewBody,
+    };
   }
 }

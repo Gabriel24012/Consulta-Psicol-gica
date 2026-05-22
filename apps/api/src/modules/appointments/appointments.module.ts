@@ -5,6 +5,7 @@ import { AvailabilityModule } from '../availability/availability.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { PatientsModule } from '../patients/patients.module';
 import { UsersModule } from '../users/users.module';
+import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { Appointment, AppointmentSchema } from './schemas/appointment.schema';
 import { AppointmentsController } from './appointments.controller';
 import { AppointmentsProcessor } from './appointments.processor';
@@ -17,6 +18,7 @@ import { AppointmentsService } from './appointments.service';
     UsersModule,
     PatientsModule,
     NotificationsModule,
+    WhatsappModule,
     forwardRef(() => AvailabilityModule),
   ],
   controllers: [AppointmentsController],
