@@ -253,6 +253,18 @@ interface InactivePatient {
             </div>
             <span class="soft-count">Semana por defecto</span>
           </div>
+          <div class="calendar-legend" aria-label="Significado de colores en citas">
+            <span class="legend-title">Colores de citas</span>
+            <div class="legend-items">
+              <span><i style="--legend-color: #d7b7ef"></i>En curso</span>
+              <span><i style="--legend-color: #b7d9ff"></i>Proxima cita</span>
+              <span><i style="--legend-color: #c8e6c9"></i>Confirmada</span>
+              <span><i style="--legend-color: #ffe6a8"></i>Pendiente</span>
+              <span><i style="--legend-color: #dddddd"></i>Cancelada</span>
+              <span><i style="--legend-color: #056C5C"></i>Finalizada</span>
+              <span><i style="--legend-color: #ffc9c9"></i>No asistio</span>
+            </div>
+          </div>
           <full-calendar [options]="calendarOptions()"></full-calendar>
         </section>
       }
@@ -1004,6 +1016,53 @@ interface InactivePatient {
 
       .calendar-panel {
         overflow: hidden;
+      }
+
+      .calendar-legend {
+        display: grid;
+        gap: 10px;
+        margin-bottom: 14px;
+        border: 1px solid #f0dce2;
+        border-radius: 8px;
+        padding: 12px;
+        background: #fffafb;
+      }
+
+      .legend-title {
+        color: #74475a;
+        font-size: 0.78rem;
+        font-weight: 900;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .legend-items {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 12px;
+      }
+
+      .legend-items span {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-height: 26px;
+        border-radius: 999px;
+        padding: 4px 9px;
+        background: #ffffff;
+        color: #5b4b52;
+        font-size: 0.85rem;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .legend-items i {
+        width: 12px;
+        height: 12px;
+        flex: 0 0 12px;
+        border: 1px solid rgba(68, 51, 59, 0.18);
+        border-radius: 999px;
+        background: var(--legend-color);
       }
 
       .calendar-panel ::ng-deep .fc {
@@ -1845,7 +1904,7 @@ export class AdminDashboardComponent implements OnInit {
   constructor(
     private readonly api: ApiService,
     private readonly fb: FormBuilder,
-  ) {}
+  ) { }
 
   ngOnInit() {
     this.refresh();
