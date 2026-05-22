@@ -9,10 +9,10 @@ import { AuthService } from '../../core/auth.service';
     <main class="auth page-shell">
       <section>
         <span class="status-pill">Acceso seguro</span>
-        <h1>{{ mode() === 'login' ? 'Iniciar sesión' : 'Crear cuenta de paciente' }}</h1>
+        <h1>{{ mode() === 'login' ? 'Iniciar sesion' : 'Crear cuenta de paciente' }}</h1>
         <p>
-          Tus datos se tratan conforme al aviso de privacidad. El portal usa control de acceso y está diseñado para
-          proteger tu información clínica-administrativa.
+          Tus datos se tratan conforme al aviso de privacidad. El portal usa control de acceso y esta disenado para
+          proteger tu informacion clinica-administrativa.
         </p>
       </section>
 
@@ -24,11 +24,23 @@ import { AuthService } from '../../core/auth.service';
 
         @if (mode() === 'register') {
           <label>Nombre completo<input class="input" formControlName="name" autocomplete="name"></label>
-          <label>Teléfono<input class="input" formControlName="phone" autocomplete="tel"></label>
+          <label>
+            Telefono
+            <input class="input" formControlName="phone" autocomplete="tel">
+            @if (controlInvalid('phone')) {
+              <span class="field-error">Escribe un telefono valido de 10 digitos.</span>
+            }
+          </label>
         }
 
-        <label>Correo<input class="input" formControlName="email" autocomplete="email"></label>
-        <label>Contraseña<input class="input" type="password" formControlName="password" autocomplete="current-password"></label>
+        <label>
+          Correo
+          <input class="input" formControlName="email" autocomplete="email">
+          @if (controlInvalid('email')) {
+            <span class="field-error">Escribe un correo valido.</span>
+          }
+        </label>
+        <label>Contrasena<input class="input" type="password" formControlName="password" autocomplete="current-password"></label>
 
         @if (mode() === 'register') {
           <label class="check">
@@ -121,6 +133,12 @@ import { AuthService } from '../../core/auth.service';
         color: #8b2d2d;
       }
 
+      .field-error {
+        color: #8b2d2d;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
       @media (max-width: 840px) {
         .auth {
           grid-template-columns: 1fr;
@@ -133,6 +151,7 @@ export class AuthComponent {
   readonly mode = signal<'login' | 'register'>('login');
   readonly loading = signal(false);
   readonly error = signal('');
+  readonly phonePattern = /^\s*(?:\+?52[\s.-]*)?(?:\(?\d{3}\)?[\s.-]*)\d{3}[\s.-]*\d{4}\s*$/;
 
   readonly form = this.fb.group({
     name: [''],
@@ -152,7 +171,7 @@ export class AuthComponent {
     this.error.set('');
     const required = mode === 'register' ? [Validators.required] : [];
     this.form.controls.name.setValidators(required);
-    this.form.controls.phone.setValidators(required);
+    this.form.controls.phone.setValidators(mode === 'register' ? [Validators.required, Validators.pattern(this.phonePattern)] : []);
     this.form.controls.password.setValidators(
       mode === 'register' ? [Validators.required, Validators.minLength(10)] : [Validators.required],
     );
@@ -191,12 +210,8 @@ export class AuthComponent {
     const status = error?.status;
     const message = error?.error?.message;
 
-    if (status === 401) {
-      return 'Correo o contraseña incorrectos. Si cambiaste ADMIN_PASSWORD en .env, debes resetear la contraseña del admin en MongoDB.';
-    }
-
     if (status === 0) {
-      return 'No se pudo conectar con el servidor. Verifica que la API esté corriendo en http://localhost:3000.';
+      return 'No se pudo conectar con el servidor. Verifica que la API este corriendo en http://localhost:3000.';
     }
 
     if (Array.isArray(message)) {
@@ -204,5 +219,10 @@ export class AuthComponent {
     }
 
     return message ?? 'No fue posible completar la solicitud. Revisa los datos e intenta otra vez.';
+  }
+
+  controlInvalid(controlName: keyof typeof this.form.controls) {
+    const control = this.form.controls[controlName];
+    return control.invalid && (control.touched || control.dirty);
   }
 }

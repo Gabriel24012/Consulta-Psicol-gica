@@ -52,6 +52,37 @@ export class AppointmentsService {
     return appointment;
   }
 
+  async createForPatientByAdmin(patient: { sub: string; name: string }, input: { startAt: string; endAt: string; reason?: string }) {
+    const psychologist = await this.usersService.findAdmin();
+    const startAt = new Date(input.startAt);
+    const endAt = new Date(input.endAt);
+    if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || startAt >= endAt) {
+      throw new BadRequestException('Rango de fechas invalido.');
+    }
+
+    const available = await this.availabilityService.isSlotBookable(psychologist._id, startAt, endAt);
+    if (!available) {
+      throw new BadRequestException('Ese horario ya no esta disponible.');
+    }
+
+    const appointment = await this.createAppointmentOrConflict(
+      { sub: patient.sub, name: patient.name, email: '', role: 'patient' },
+      psychologist._id,
+      startAt,
+      endAt,
+      input.reason,
+    );
+    await this.patientsService.touchBooked(patient.sub);
+    await this.notificationsService.create({
+      userId: psychologist._id.toString(),
+      type: 'appointment',
+      message: `${patient.name} quedo agendado desde alta rapida para ${startAt.toLocaleString('es-MX')}.`,
+      metadata: { appointmentId: appointment._id, source: 'admin_quick_intake' },
+    });
+    await this.scheduleReminder(appointment._id.toString(), startAt);
+    return appointment;
+  }
+
   listForUser(user: AuthUser) {
     const filter = user.role === 'admin' ? {} : { patientId: user.sub };
     return this.appointmentModel.find(filter).sort({ startAt: 1 }).populate('patientId', 'name email phone').exec();

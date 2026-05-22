@@ -1,5 +1,5 @@
 export type UserRole = 'admin' | 'patient';
-export type UserStatus = 'active' | 'inactive' | 'blocked';
+export type UserStatus = 'active' | 'inactive' | 'blocked' | 'incomplete';
 export type PatientStatus = 'new' | 'active' | 'inactive' | 'follow_up' | 'discharged';
 export type AppointmentStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'no_show';
 export type PatientConfirmation = 'pending' | 'yes' | 'no';

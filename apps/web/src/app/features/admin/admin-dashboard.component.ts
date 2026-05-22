@@ -1,6 +1,6 @@
 import { DatePipe, LowerCasePipe } from '@angular/common';
 import { Component, OnInit, computed, signal } from '@angular/core';
-import { FormBuilder, ReactiveFormsModule } from '@angular/forms';
+import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { CalendarOptions, EventClickArg, EventInput } from '@fullcalendar/core';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
@@ -8,7 +8,7 @@ import timeGridPlugin from '@fullcalendar/timegrid';
 import { FullCalendarModule } from '@fullcalendar/angular';
 import { ApiService } from '../../core/api.service';
 
-type AdminTab = 'today' | 'calendar' | 'patients' | 'schedule';
+type AdminTab = 'today' | 'calendar' | 'patients' | 'schedule' | 'quick-intake';
 type AppointmentStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'no_show';
 
 interface Slot {
@@ -21,6 +21,7 @@ interface PatientRow {
   name: string;
   email: string;
   phone: string;
+  status?: string;
   profile: PatientProfile;
 }
 
@@ -91,6 +92,13 @@ interface InactivePatient {
   lastSessionAt?: string;
 }
 
+interface QuickIntakeResult {
+  patient: PatientRow;
+  completionUrl: string;
+  expiresAt: string;
+  appointment?: AppointmentRow | null;
+}
+
 @Component({
   standalone: true,
   imports: [DatePipe, LowerCasePipe, ReactiveFormsModule, FullCalendarModule],
@@ -114,6 +122,7 @@ interface InactivePatient {
         <button type="button" [class.active]="activeTab() === 'calendar'" (click)="activeTab.set('calendar')">Calendario</button>
         <button type="button" [class.active]="activeTab() === 'patients'" (click)="activeTab.set('patients')">Pacientes</button>
         <button type="button" [class.active]="activeTab() === 'schedule'" (click)="activeTab.set('schedule')">Horarios</button>
+        <button type="button" [class.active]="activeTab() === 'quick-intake'" (click)="openQuickIntake()">Alta paciente</button>
       </nav>
 
       @if (activeTab() === 'today') {
@@ -285,9 +294,9 @@ interface InactivePatient {
                   <span class="patient-avatar">{{ initials(patient.name) }}</span>
                   <span>
                     <strong>{{ patient.name }}</strong>
-                    <small>{{ patient.email }} · {{ patient.phone }}</small>
+                    <small>{{ patientContactLabel(patient) }}</small>
                   </span>
-                  <b>{{ patientStatusLabel(patient.profile.patientStatus) }}</b>
+                  <b>{{ patientCompletionLabel(patient) }}</b>
                 </button>
               } @empty {
                 <p class="empty-state">No hay pacientes registrados.</p>
@@ -381,6 +390,117 @@ interface InactivePatient {
               </button>
             }
           </div>
+        </section>
+      }
+
+      @if (activeTab() === 'quick-intake') {
+        <section class="quick-intake-grid">
+          <article class="panel-card quick-intake-panel">
+            <div class="panel-title">
+              <div>
+                <span class="eyebrow">Alta rápida</span>
+                <h2>Dar de alta paciente</h2>
+                <p>Crea el perfil con nombre, bloquea una cita si hace falta y comparte un link para completar datos.</p>
+              </div>
+            </div>
+
+            <form class="quick-intake-form" [formGroup]="quickIntakeForm" (ngSubmit)="createQuickPatient()">
+              <label class="field field-wide">
+                <span>Nombre del paciente</span>
+                <input class="input" formControlName="name" autocomplete="off" placeholder="Nombre completo">
+              </label>
+
+              <label class="check-line">
+                <input type="checkbox" formControlName="scheduleNow" (change)="toggleQuickSchedule()">
+                Agendar una cita de una vez
+              </label>
+
+              @if (quickIntakeForm.value.scheduleNow) {
+                <div class="quick-schedule-box">
+                  <div class="mini-calendar">
+                    <div class="month-nav">
+                      <button class="dock-icon" type="button" (click)="previousQuickMonth()" aria-label="Mes anterior">&lsaquo;</button>
+                      <strong>{{ quickMonthLabel() }}</strong>
+                      <button class="dock-icon" type="button" (click)="nextQuickMonth()" aria-label="Mes siguiente">&rsaquo;</button>
+                    </div>
+                    <div class="weekdays">
+                      @for (weekday of weekdays; track weekday) {
+                        <span>{{ weekday }}</span>
+                      }
+                    </div>
+                    <div class="calendar-grid">
+                      @for (day of quickCalendarDays(); track day.key) {
+                        <button
+                          type="button"
+                          [class.outside]="!day.inMonth"
+                          [class.today]="day.isToday"
+                          [class.available]="day.available"
+                          [class.selected]="day.key === quickSelectedDate()"
+                          [disabled]="!day.inMonth || day.isPast"
+                          (click)="selectQuickDate(day.key)"
+                        >
+                          {{ day.label }}
+                        </button>
+                      }
+                    </div>
+                  </div>
+
+                  <div class="time-section">
+                    <h3>Horarios disponibles</h3>
+                    @if (quickSlotsLoading()) {
+                      <p class="empty-state">Buscando horarios disponibles...</p>
+                    } @else {
+                      <div class="time-group compact-times">
+                        <div>
+                          @for (slot of quickSlots(); track slot.startAt) {
+                            <button
+                              type="button"
+                              [class.selected-time]="quickSelectedSlot()?.startAt === slot.startAt"
+                              (click)="quickSelectedSlot.set(slot)"
+                            >
+                              {{ slot.startAt | date: 'shortTime' }}
+                            </button>
+                          }
+                        </div>
+                      </div>
+                      @if (!quickSlots().length) {
+                        <p class="empty-state">No hay horarios disponibles para este día.</p>
+                      }
+                    }
+                  </div>
+                </div>
+              }
+
+              @if (quickIntakeMessage()) {
+                <p class="save-message" [class.error-message]="quickIntakeError()">{{ quickIntakeMessage() }}</p>
+              }
+
+              <button class="btn btn-primary" type="submit" [disabled]="quickIntakeForm.invalid || quickIntakeSaving()">
+                {{ quickIntakeSaving() ? 'Creando...' : 'Crear paciente y link' }}
+              </button>
+            </form>
+          </article>
+
+          <article class="panel-card quick-link-panel">
+            <div class="panel-title compact">
+              <h2>Link para WhatsApp</h2>
+              <span class="soft-count">7 días</span>
+            </div>
+            @if (quickIntakeResult(); as result) {
+              <div class="generated-link">
+                <span>Paciente</span>
+                <strong>{{ result.patient.name }}</strong>
+                <input class="input" readonly [value]="result.completionUrl">
+                <div class="hero-actions">
+                  <button class="btn btn-soft" type="button" (click)="copyQuickLink()">Copiar link</button>
+                  <a class="btn btn-primary" [href]="whatsappShareUrl(result)" target="_blank" rel="noopener">WhatsApp</a>
+                </div>
+                <small>Expira: {{ invitationExpiryLabel(result.expiresAt) }}</small>
+              </div>
+            } @else {
+              <p class="empty-state">Cuando crees el paciente, aquí aparecerá el link listo para enviar.</p>
+            }
+          </article>
         </section>
       }
     </main>
@@ -478,21 +598,28 @@ interface InactivePatient {
           <section class="patient-snapshot">
             <div>
               <span>Email</span>
-              <strong>{{ patient.email }}</strong>
+              <strong>{{ patient.email || 'Pendiente' }}</strong>
             </div>
             <div>
               <span>Teléfono</span>
-              <strong>{{ patient.phone }}</strong>
+              <strong>{{ patient.phone || 'Pendiente' }}</strong>
             </div>
             <div>
               <span>Estado</span>
-              <strong>{{ patientStatusLabel(patient.profile.patientStatus) }}</strong>
+              <strong>{{ patientCompletionLabel(patient) }}</strong>
             </div>
             <div>
               <span>Sesiones</span>
               <strong>{{ patient.profile.totalSessions }}</strong>
             </div>
           </section>
+          @if (isIncompletePatient(patient)) {
+            <section class="pending-profile">
+              <strong>Perfil pendiente de completar</strong>
+              <p>Regenera un link si el anterior expiró o se perdió.</p>
+              <button class="btn btn-soft" type="button" (click)="regeneratePatientLink(patient)">Generar link nuevo</button>
+            </section>
+          }
           <form class="notes-form" [formGroup]="notesForm" (ngSubmit)="saveNotes()">
             <label class="field">
               <span>Nota administrativa</span>
@@ -1162,6 +1289,46 @@ interface InactivePatient {
         font-weight: 800;
       }
 
+      .quick-intake-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .quick-intake-form,
+      .generated-link,
+      .quick-schedule-box {
+        display: grid;
+        gap: 14px;
+      }
+
+      .check-line {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: #594851;
+        font-weight: 850;
+      }
+
+      .quick-schedule-box {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px;
+        background: #fffafb;
+      }
+
+      .generated-link span,
+      .generated-link small {
+        color: var(--muted);
+        font-weight: 800;
+      }
+
+      .generated-link strong {
+        color: #4a3740;
+        font-size: 22px;
+      }
+
       .week-rules {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1301,6 +1468,21 @@ interface InactivePatient {
       .admin-reschedule {
         display: grid;
         gap: 12px;
+      }
+
+      .pending-profile {
+        display: grid;
+        gap: 8px;
+        border: 1px solid #efd3a6;
+        border-radius: 8px;
+        padding: 12px;
+        background: #fff8ea;
+        color: #6f4e1f;
+      }
+
+      .pending-profile p {
+        margin: 0;
+        color: #7b6645;
       }
 
       .mini-calendar {
@@ -1803,6 +1985,16 @@ export class AdminDashboardComponent implements OnInit {
   readonly reminderError = signal(false);
   readonly drawerMessage = signal('');
   readonly drawerError = signal(false);
+  readonly quickIntakeMessage = signal('');
+  readonly quickIntakeError = signal(false);
+  readonly quickIntakeSaving = signal(false);
+  readonly quickSlotsLoading = signal(false);
+  readonly quickSlots = signal<Slot[]>([]);
+  readonly quickSelectedSlot = signal<Slot | null>(null);
+  readonly quickSelectedDate = signal(this.formatDateKey(new Date()));
+  readonly quickVisibleMonth = signal(new Date());
+  readonly quickAvailableDayKeys = signal<Set<string>>(new Set());
+  readonly quickIntakeResult = signal<QuickIntakeResult | null>(null);
   readonly editingRuleId = signal<string | null>(null);
   readonly editingWeekday = signal<number | null>(null);
   readonly drawerOpen = signal(false);
@@ -1828,6 +2020,10 @@ export class AdminDashboardComponent implements OnInit {
   });
   readonly chatForm = this.fb.group({ content: [''] });
   readonly notesForm = this.fb.group({ administrativeNotes: [''] });
+  readonly quickIntakeForm = this.fb.group({
+    name: ['', [Validators.required]],
+    scheduleNow: [false],
+  });
 
   readonly sortedAppointments = computed(() =>
     [...this.appointments()].sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()),
@@ -1951,6 +2147,160 @@ export class AdminDashboardComponent implements OnInit {
     this.api
       .get<Array<{ _id: string; message: string; status?: string; patientId?: { name?: string; email?: string } }>>('/suggestions')
       .subscribe((suggestions) => this.suggestions.set(suggestions));
+  }
+
+  openQuickIntake() {
+    this.activeTab.set('quick-intake');
+    this.quickIntakeMessage.set('');
+    this.quickIntakeError.set(false);
+    if (this.quickIntakeForm.value.scheduleNow) {
+      this.loadQuickMonthAvailability();
+      this.loadQuickSlots();
+    }
+  }
+
+  toggleQuickSchedule() {
+    this.quickSelectedSlot.set(null);
+    if (this.quickIntakeForm.value.scheduleNow) {
+      this.loadQuickMonthAvailability();
+      this.loadQuickSlots();
+    } else {
+      this.quickSlots.set([]);
+    }
+  }
+
+  loadQuickSlots() {
+    const date = this.quickSelectedDate();
+    const from = new Date(`${date}T00:00:00`);
+    const to = new Date(`${date}T23:59:59`);
+    this.quickSlotsLoading.set(true);
+    this.quickSelectedSlot.set(null);
+    this.api.get<Slot[]>(`/availability/slots?from=${from.toISOString()}&to=${to.toISOString()}`).subscribe({
+      next: (slots) => {
+        this.quickSlots.set(this.uniqueSlots(slots));
+        this.quickSlotsLoading.set(false);
+      },
+      error: () => {
+        this.quickSlots.set([]);
+        this.quickSlotsLoading.set(false);
+      },
+    });
+  }
+
+  selectQuickDate(date: string) {
+    this.quickSelectedDate.set(date);
+    this.loadQuickSlots();
+  }
+
+  previousQuickMonth() {
+    const current = this.quickVisibleMonth();
+    this.quickVisibleMonth.set(new Date(current.getFullYear(), current.getMonth() - 1, 1));
+    this.loadQuickMonthAvailability();
+  }
+
+  nextQuickMonth() {
+    const current = this.quickVisibleMonth();
+    this.quickVisibleMonth.set(new Date(current.getFullYear(), current.getMonth() + 1, 1));
+    this.loadQuickMonthAvailability();
+  }
+
+  quickMonthLabel() {
+    return this.quickVisibleMonth().toLocaleDateString('es-MX', { month: 'long', year: 'numeric' });
+  }
+
+  quickCalendarDays() {
+    const month = this.quickVisibleMonth();
+    const first = new Date(month.getFullYear(), month.getMonth(), 1);
+    const startOffset = (first.getDay() + 6) % 7;
+    const start = new Date(first);
+    start.setDate(first.getDate() - startOffset);
+    const todayKey = this.formatDateKey(new Date());
+
+    return Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(start);
+      date.setDate(start.getDate() + index);
+      const key = this.formatDateKey(date);
+      return {
+        key,
+        label: date.getDate(),
+        inMonth: date.getMonth() === month.getMonth(),
+        isToday: key === todayKey,
+        isPast: key < todayKey,
+        available: this.quickAvailableDayKeys().has(key),
+      };
+    });
+  }
+
+  loadQuickMonthAvailability() {
+    const month = this.quickVisibleMonth();
+    const from = new Date(month.getFullYear(), month.getMonth(), 1, 0, 0, 0);
+    const to = new Date(month.getFullYear(), month.getMonth() + 1, 0, 23, 59, 59);
+    this.api.get<Slot[]>(`/availability/slots?from=${from.toISOString()}&to=${to.toISOString()}`).subscribe({
+      next: (slots) => {
+        this.quickAvailableDayKeys.set(new Set(this.uniqueSlots(slots).map((slot) => this.formatDateKey(new Date(slot.startAt)))));
+      },
+      error: () => this.quickAvailableDayKeys.set(new Set()),
+    });
+  }
+
+  createQuickPatient() {
+    if (this.quickIntakeForm.invalid) return;
+    const value = this.quickIntakeForm.getRawValue();
+    const slot = this.quickSelectedSlot();
+    this.quickIntakeMessage.set('');
+    this.quickIntakeError.set(false);
+
+    if (value.scheduleNow && !slot) {
+      this.quickIntakeError.set(true);
+      this.quickIntakeMessage.set('Selecciona un horario disponible para agendar la cita.');
+      return;
+    }
+
+    const payload = {
+      name: value.name?.trim(),
+      appointment: value.scheduleNow && slot ? { startAt: slot.startAt, endAt: slot.endAt } : undefined,
+    };
+    this.quickIntakeSaving.set(true);
+    this.api.post<QuickIntakeResult>('/patient-invitations', payload).subscribe({
+      next: (result) => {
+        this.quickIntakeSaving.set(false);
+        this.quickIntakeResult.set(result);
+        this.quickIntakeMessage.set('Paciente creado. Link listo para enviar.');
+        this.quickIntakeForm.patchValue({ name: '', scheduleNow: false });
+        this.quickSlots.set([]);
+        this.quickSelectedSlot.set(null);
+        this.refresh();
+      },
+      error: (error) => {
+        this.quickIntakeSaving.set(false);
+        this.quickIntakeError.set(true);
+        this.quickIntakeMessage.set(this.apiErrorMessage(error, 'No se pudo crear el paciente.'));
+      },
+    });
+  }
+
+  copyQuickLink() {
+    const link = this.quickIntakeResult()?.completionUrl;
+    if (!link) return;
+    void navigator.clipboard?.writeText(link);
+    this.quickIntakeMessage.set('Link copiado.');
+    this.quickIntakeError.set(false);
+  }
+
+  whatsappShareUrl(result: QuickIntakeResult) {
+    const message = `Hola ${result.patient.name}, completa tu perfil para tu cita con este link: ${result.completionUrl}`;
+    return `https://wa.me/?text=${encodeURIComponent(message)}`;
+  }
+
+  invitationExpiryLabel(value: string) {
+    return new Date(value).toLocaleString('es-MX', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
   }
 
   openAppointmentById(id: string) {
@@ -2324,6 +2674,40 @@ export class AdminDashboardComponent implements OnInit {
       discharged: 'Alta',
     };
     return labels[status] ?? status;
+  }
+
+  isIncompletePatient(patient: PatientRow) {
+    return patient.status === 'incomplete' || !patient.email || !patient.phone;
+  }
+
+  patientCompletionLabel(patient: PatientRow) {
+    return this.isIncompletePatient(patient) ? 'Pendiente de completar' : this.patientStatusLabel(patient.profile.patientStatus);
+  }
+
+  patientContactLabel(patient: PatientRow) {
+    if (this.isIncompletePatient(patient)) return 'Datos pendientes';
+    return `${patient.email} · ${patient.phone}`;
+  }
+
+  regeneratePatientLink(patient: PatientRow) {
+    this.drawerMessage.set('');
+    this.drawerError.set(false);
+    this.api.post<{ completionUrl: string; expiresAt: string }>(`/patient-invitations/${patient._id}/regenerate`, {}).subscribe({
+      next: (result) => {
+        this.quickIntakeResult.set({ patient, completionUrl: result.completionUrl, expiresAt: result.expiresAt });
+        this.drawerMessage.set('Link regenerado. Lo dejamos listo en Alta paciente para copiar o enviar.');
+        this.activeTab.set('quick-intake');
+      },
+      error: (error) => {
+        this.drawerError.set(true);
+        this.drawerMessage.set(this.apiErrorMessage(error, 'No se pudo generar un link nuevo.'));
+      },
+    });
+  }
+
+  private apiErrorMessage(error: any, fallback: string) {
+    const message = error?.error?.message;
+    return Array.isArray(message) ? message.join(' ') : message ?? fallback;
   }
 
   newSuggestionsCount() {

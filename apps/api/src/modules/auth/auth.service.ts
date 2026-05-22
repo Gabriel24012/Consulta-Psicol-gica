@@ -32,7 +32,7 @@ export class AuthService {
     await this.patientsService.createForUser(user._id);
     return this.issueTokens({
       sub: user._id.toString(),
-      email: user.email,
+      email: user.email ?? dto.email,
       role: user.role,
       name: user.name,
     });
@@ -40,18 +40,27 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const user = await this.usersService.findByEmailWithPassword(dto.email);
-    if (!user || user.status !== 'active') {
-      throw new UnauthorizedException('Credenciales inválidas.');
+    if (!user) {
+      throw new UnauthorizedException('No existe una cuenta registrada con ese correo.');
+    }
+    if (user.status === 'incomplete' || !user.passwordHash) {
+      throw new UnauthorizedException('Tu perfil aun no esta completo. Usa el link que te envio el consultorio.');
+    }
+    if (user.status === 'blocked') {
+      throw new UnauthorizedException('Esta cuenta esta bloqueada. Contacta al consultorio para recuperar el acceso.');
+    }
+    if (user.status !== 'active') {
+      throw new UnauthorizedException('Esta cuenta no esta activa. Contacta al consultorio para revisar el acceso.');
     }
 
     const ok = await argon2.verify(user.passwordHash, dto.password);
     if (!ok) {
-      throw new UnauthorizedException('Credenciales inválidas.');
+      throw new UnauthorizedException('La contrasena no coincide con ese correo.');
     }
 
     return this.issueTokens({
       sub: user._id.toString(),
-      email: user.email,
+      email: user.email ?? dto.email,
       role: user.role,
       name: user.name,
     });
@@ -69,15 +78,15 @@ export class AuthService {
 
     const current = await this.usersService.findByIdWithRefreshToken(payload.sub);
     if (!current || current.status !== 'active' || !current.refreshTokenHash || !refreshToken) {
-      throw new UnauthorizedException('Sesión inválida.');
+      throw new UnauthorizedException('Sesion invalida.');
     }
     const ok = await argon2.verify(current.refreshTokenHash, refreshToken);
     if (!ok) {
-      throw new UnauthorizedException('Sesión inválida.');
+      throw new UnauthorizedException('Sesion invalida.');
     }
     return this.issueTokens({
       sub: current._id.toString(),
-      email: current.email,
+      email: current.email ?? '',
       role: current.role,
       name: current.name,
     });
@@ -88,7 +97,7 @@ export class AuthService {
     return { ok: true };
   }
 
-  private async issueTokens(user: AuthUser) {
+  async issueTokens(user: AuthUser) {
     const accessToken = await this.jwt.signAsync(user, {
       secret: this.config.getOrThrow<string>('JWT_ACCESS_SECRET'),
       expiresIn: this.config.get<string>('JWT_ACCESS_EXPIRES_IN', '15m'),

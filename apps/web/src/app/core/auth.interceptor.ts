@@ -7,7 +7,11 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
   const auth = inject(AuthService);
   return next(request).pipe(
     catchError((error: unknown) => {
-      const isAuthRequest = request.url.includes('/auth/login') || request.url.includes('/auth/register') || request.url.includes('/auth/refresh');
+      const isAuthRequest =
+        request.url.includes('/auth/login') ||
+        request.url.includes('/auth/register') ||
+        request.url.includes('/auth/refresh') ||
+        request.url.includes('/patient-invitations/');
       if (!(error instanceof HttpErrorResponse) || error.status !== 401 || isAuthRequest) {
         return throwError(() => error);
       }
