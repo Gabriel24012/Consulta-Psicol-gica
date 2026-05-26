@@ -1,7 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthUser } from '@itzel/shared';
-import { Observable, catchError, finalize, map, of, shareReplay, tap } from 'rxjs';
+import { Observable, catchError, finalize, map, of, shareReplay, tap, throwError } from 'rxjs';
 import { ApiService } from './api.service';
 
 interface AuthResponse {
@@ -12,6 +12,7 @@ interface AuthResponse {
 export class AuthService {
   readonly currentUser = signal<AuthUser | null>(null);
   private sessionRequest?: Observable<AuthUser | null>;
+  private refreshRequest?: Observable<AuthUser>;
   private sessionRestoreFailed = false;
 
   constructor(
@@ -62,7 +63,14 @@ export class AuthService {
   }
 
   refreshSession() {
-    return this.api.post<AuthResponse>('/auth/refresh', {}).pipe(
+    if (this.sessionRestoreFailed) {
+      return throwError(() => new Error('Session refresh already failed.'));
+    }
+    if (this.refreshRequest) {
+      return this.refreshRequest;
+    }
+
+    this.refreshRequest = this.api.post<AuthResponse>('/auth/refresh', {}).pipe(
       map((response) => response.user),
       tap((user) => {
         this.sessionRestoreFailed = false;
@@ -71,9 +79,15 @@ export class AuthService {
       catchError((error) => {
         this.currentUser.set(null);
         this.sessionRestoreFailed = true;
-        throw error;
+        return throwError(() => error);
       }),
+      finalize(() => {
+        this.refreshRequest = undefined;
+      }),
+      shareReplay(1),
     );
+
+    return this.refreshRequest;
   }
 
   logout() {
