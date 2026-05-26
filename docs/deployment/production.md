@@ -29,7 +29,7 @@ Si el dominio aun no esta listo, usa primero `docs/deployment/pre-domain-ip.md` 
 - Restringir CORS al dominio real; nunca desplegar produccion con `WEB_ORIGIN=http://localhost:4200`.
 - No subir `.env` real al repositorio y no usar secretos de ejemplo.
 - Generar secretos largos y unicos para `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `FIELD_ENCRYPTION_KEY`, `REDIS_PASSWORD` y `WHATSAPP_VERIFY_TOKEN`.
-- Configurar `NODE_ENV=production`, `WEB_PUBLIC_URL` con el dominio real, `COOKIE_SECURE=true` y `COOKIE_DOMAIN` solo si se usan subdominios compartidos.
+- Configurar `NODE_ENV=production`, `WEB_PUBLIC_URL` con el dominio real, `COOKIE_SECURE=true`, `LETSENCRYPT_HOST_PATH` con la ruta local de certificados y `COOKIE_DOMAIN` solo si se usan subdominios compartidos.
 - Abrir en firewall solo 80/443 hacia internet; MongoDB Atlas debe permitir solo la IP del servidor y Redis no debe exponerse fuera de Docker.
 - Activar backups de MongoDB Atlas antes de operar con pacientes reales.
 - Rotar secretos periodicamente y despues de cualquier sospecha de exposicion.
