@@ -55,18 +55,18 @@ describe('AuthService login messages', () => {
     getOrThrow: jest.fn((key: string) => key),
   };
 
-  it('explains when an account does not exist', async () => {
+  it('does not reveal when an account does not exist', async () => {
     const usersService = {
       findByEmailWithPassword: jest.fn().mockResolvedValue(null),
     };
     const service = new AuthService(usersService as any, {} as any, jwt as any, config as any);
 
     await expect(service.login({ email: 'missing@example.com', password: 'password' })).rejects.toThrow(
-      'No existe una cuenta registrada con ese correo.',
+      'Correo o contrasena incorrectos.',
     );
   });
 
-  it('explains when the password does not match', async () => {
+  it('does not reveal when the password does not match', async () => {
     const usersService = {
       findByEmailWithPassword: jest.fn().mockResolvedValue({
         _id: { toString: () => 'patient-id' },
@@ -81,7 +81,7 @@ describe('AuthService login messages', () => {
     const service = new AuthService(usersService as any, {} as any, jwt as any, config as any);
 
     await expect(service.login({ email: 'patient@example.com', password: 'wrong' })).rejects.toThrow(
-      'La contrasena no coincide con ese correo.',
+      'Correo o contrasena incorrectos.',
     );
   });
 });

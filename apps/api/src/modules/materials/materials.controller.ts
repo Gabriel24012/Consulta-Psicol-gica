@@ -99,7 +99,8 @@ export class MaterialsController {
     const file = await this.materialsService.getDownload(fileId, user);
     response.setHeader('Content-Type', file.mimeType);
     response.setHeader('Content-Length', String(file.size));
-    response.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.originalName)}"`);
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.attachment(file.originalName);
     createReadStream(file.path).pipe(response);
   }
 }

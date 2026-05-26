@@ -41,7 +41,7 @@ export class AuthService {
   async login(dto: LoginDto) {
     const user = await this.usersService.findByEmailWithPassword(dto.email);
     if (!user) {
-      throw new UnauthorizedException('No existe una cuenta registrada con ese correo.');
+      throw new UnauthorizedException('Correo o contrasena incorrectos.');
     }
     if (user.status === 'incomplete' || !user.passwordHash) {
       throw new UnauthorizedException('Tu perfil aun no esta completo. Usa el link que te envio el consultorio.');
@@ -55,7 +55,7 @@ export class AuthService {
 
     const ok = await argon2.verify(user.passwordHash, dto.password);
     if (!ok) {
-      throw new UnauthorizedException('La contrasena no coincide con ese correo.');
+      throw new UnauthorizedException('Correo o contrasena incorrectos.');
     }
 
     return this.issueTokens({

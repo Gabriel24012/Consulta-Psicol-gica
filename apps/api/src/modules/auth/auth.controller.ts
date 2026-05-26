@@ -1,7 +1,10 @@
 import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { clearAuthCookies, setAuthCookies } from '../../common/http/auth-cookies';
 import { AuthUser } from '@itzel/shared';
 import { AuthService } from './auth.service';
 import { LoginDto, RegisterDto } from './dto/auth.dto';
@@ -14,35 +17,42 @@ interface AuthResult {
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly config: ConfigService,
+  ) {}
 
+  @Throttle({ auth: { ttl: 60_000, limit: 5 } })
   @Post('register')
   async register(@Body() dto: RegisterDto, @Res({ passthrough: true }) response: Response) {
     const result = await this.authService.register(dto);
-    this.setCookies(response, result.accessToken, result.refreshToken);
+    setAuthCookies(response, this.config, result.accessToken, result.refreshToken);
     return this.toSession(result);
   }
 
+  @Throttle({ auth: { ttl: 60_000, limit: 5 } })
   @Post('login')
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) response: Response) {
     const result = await this.authService.login(dto);
-    this.setCookies(response, result.accessToken, result.refreshToken);
+    setAuthCookies(response, this.config, result.accessToken, result.refreshToken);
     return this.toSession(result);
   }
 
+  @Throttle({ auth: { ttl: 60_000, limit: 10 } })
   @Post('refresh')
   async refresh(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
-    const refreshToken = request.cookies?.refreshToken ?? request.body?.refreshToken;
+    const refreshToken =
+      request.cookies?.refreshToken ??
+      (this.config.get<string>('NODE_ENV') === 'production' ? undefined : request.body?.refreshToken);
     const result = await this.authService.refresh(refreshToken);
-    this.setCookies(response, result.accessToken, result.refreshToken);
+    setAuthCookies(response, this.config, result.accessToken, result.refreshToken);
     return this.toSession(result);
   }
 
   @UseGuards(JwtAuthGuard)
   @Post('logout')
   logout(@CurrentUser() user: AuthUser, @Res({ passthrough: true }) response: Response) {
-    response.clearCookie('accessToken');
-    response.clearCookie('refreshToken');
+    clearAuthCookies(response, this.config);
     return this.authService.logout(user.sub);
   }
 
@@ -50,22 +60,6 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: AuthUser) {
     return user;
-  }
-
-  private setCookies(response: Response, accessToken: string, refreshToken: string) {
-    const secure = process.env.NODE_ENV === 'production';
-    response.cookie('accessToken', accessToken, {
-      httpOnly: true,
-      secure,
-      sameSite: 'lax',
-      maxAge: 15 * 60 * 1000,
-    });
-    response.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure,
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
   }
 
   private toSession(result: AuthResult) {

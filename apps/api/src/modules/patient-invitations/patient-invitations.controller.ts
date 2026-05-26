@@ -1,9 +1,12 @@
 import { Body, Controller, Get, Param, Post, Res, UseGuards } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { AuthUser } from '@itzel/shared';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { setAuthCookies } from '../../common/http/auth-cookies';
 import { AuthService } from '../auth/auth.service';
 import { CompletePatientInvitationDto, CreatePatientInvitationDto } from './dto/patient-invitation.dto';
 import { PatientInvitationsService } from './patient-invitations.service';
@@ -13,6 +16,7 @@ export class PatientInvitationsController {
   constructor(
     private readonly invitationsService: PatientInvitationsService,
     private readonly authService: AuthService,
+    private readonly config: ConfigService,
   ) {}
 
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -30,11 +34,13 @@ export class PatientInvitationsController {
   }
 
   @Get(':token')
+  @Throttle({ auth: { ttl: 60_000, limit: 20 } })
   preview(@Param('token') token: string) {
     return this.invitationsService.preview(token);
   }
 
   @Post(':token/complete')
+  @Throttle({ auth: { ttl: 60_000, limit: 5 } })
   async complete(@Param('token') token: string, @Body() dto: CompletePatientInvitationDto, @Res({ passthrough: true }) response: Response) {
     const user = await this.invitationsService.complete(token, dto);
     const authUser: AuthUser = {
@@ -44,23 +50,7 @@ export class PatientInvitationsController {
       name: user.name,
     };
     const result = await this.authService.issueTokens(authUser);
-    this.setCookies(response, result.accessToken, result.refreshToken);
+    setAuthCookies(response, this.config, result.accessToken, result.refreshToken);
     return { user: result.user };
-  }
-
-  private setCookies(response: Response, accessToken: string, refreshToken: string) {
-    const secure = process.env.NODE_ENV === 'production';
-    response.cookie('accessToken', accessToken, {
-      httpOnly: true,
-      secure,
-      sameSite: 'lax',
-      maxAge: 15 * 60 * 1000,
-    });
-    response.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure,
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
   }
 }

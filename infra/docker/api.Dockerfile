@@ -17,4 +17,6 @@ RUN apk add --no-cache tzdata
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
+RUN mkdir -p /app/uploads && chown -R node:node /app
+USER node
 CMD ["node", "apps/api/dist/main.js"]
