@@ -6,6 +6,7 @@ services:
     env_file:
       - ../../.env
     environment:
+      TZ: ${APPOINTMENT_TIMEZONE:-America/Mexico_City}
       MATERIALS_UPLOAD_DIR: /app/uploads/materials
     volumes:
       - materials-uploads:/app/uploads
