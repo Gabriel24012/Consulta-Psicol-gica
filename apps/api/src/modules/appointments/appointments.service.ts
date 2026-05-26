@@ -27,7 +27,7 @@ export class AppointmentsService {
     private readonly config: ConfigService,
   ) {}
 
-  async create(patient: AuthUser, input: { startAt: string; endAt: string; reason?: string }) {
+  async create(patient: AuthUser, input: { startAt: string; endAt: string; reason?: string }, options: { excludeAppointmentId?: string } = {}) {
     const psychologist = await this.usersService.findAdmin();
     const startAt = new Date(input.startAt);
     const endAt = new Date(input.endAt);
@@ -40,6 +40,7 @@ export class AppointmentsService {
       throw new BadRequestException('Ese horario ya no esta disponible.');
     }
 
+    await this.ensurePatientHasNoUpcomingAppointment(patient.sub, options.excludeAppointmentId);
     const appointment = await this.createAppointmentOrConflict(patient, psychologist._id, startAt, endAt, input.reason);
     await this.patientsService.touchBooked(patient.sub);
     await this.notificationsService.create({
@@ -65,6 +66,7 @@ export class AppointmentsService {
       throw new BadRequestException('Ese horario ya no esta disponible.');
     }
 
+    await this.ensurePatientHasNoUpcomingAppointment(patient.sub);
     const appointment = await this.createAppointmentOrConflict(
       { sub: patient.sub, name: patient.name, email: '', role: 'patient' },
       psychologist._id,
@@ -142,6 +144,7 @@ export class AppointmentsService {
     const newAppointment = await this.create(
       { ...user, sub: oldAppointment.patientId.toString() },
       { ...input, reason: oldAppointment.reason },
+      { excludeAppointmentId: oldAppointment._id.toString() },
     );
     newAppointment.rescheduledFrom = oldAppointment._id;
     await newAppointment.save();
@@ -270,6 +273,32 @@ export class AppointmentsService {
         throw new ConflictException('Ese horario acaba de ser reservado. Elige otro horario disponible.');
       }
       throw error;
+    }
+  }
+
+  private async ensurePatientHasNoUpcomingAppointment(patientId: string, excludeAppointmentId?: string) {
+    const filter: Record<string, unknown> = {
+      patientId,
+      startAt: { $gte: new Date() },
+      status: { $in: ['pending', 'confirmed'] },
+    };
+    if (excludeAppointmentId) {
+      filter._id = { $ne: excludeAppointmentId };
+    }
+
+    const existingAppointment = await this.appointmentModel.findOne(filter).exec();
+    if (existingAppointment) {
+      const dateLabel = existingAppointment.startAt.toLocaleDateString('es-MX', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+      const timeLabel = existingAppointment.startAt.toLocaleTimeString('es-MX', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+      throw new ConflictException(`Ya tienes una sesion agendada para ${dateLabel} a las ${timeLabel}.`);
     }
   }
 

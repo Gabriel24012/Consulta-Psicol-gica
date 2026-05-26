@@ -1,6 +1,7 @@
 import { DatePipe } from '@angular/common';
 import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { HttpErrorResponse } from '@angular/common/http';
 import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 
@@ -14,6 +15,7 @@ interface Appointment {
   startAt: string;
   endAt: string;
   status: string;
+  reason?: string;
 }
 
 interface Suggestion {
@@ -39,11 +41,78 @@ interface NotificationItem {
   createdAt?: string;
 }
 
+interface BookingNotice {
+  title: string;
+  message: string;
+  tone: 'info' | 'success' | 'error';
+}
+
 @Component({
   standalone: true,
   imports: [DatePipe, ReactiveFormsModule],
   template: `
     <main class="portal page-shell">
+      @if (bookingNotice(); as notice) {
+        <aside
+          class="booking-toast"
+          [class.success]="notice.tone === 'success'"
+          [class.error]="notice.tone === 'error'"
+          role="status"
+          aria-live="polite"
+        >
+          <div>
+            <strong>{{ notice.title }}</strong>
+            <p>{{ notice.message }}</p>
+          </div>
+          <button type="button" aria-label="Cerrar aviso" (click)="closeBookingNotice()">×</button>
+        </aside>
+      }
+
+      @if (pendingBookingSlot(); as slot) {
+        <aside class="booking-confirm" role="dialog" aria-modal="false" aria-label="Confirmar cita">
+          <span class="status-pill">Confirmacion {{ bookingConfirmationStep() }} de 2</span>
+          <strong>{{ bookingConfirmationStep() === 1 ? 'Revisa tu horario' : 'Ultima confirmacion' }}</strong>
+          <p>
+            {{ bookingConfirmationStep() === 1
+              ? 'Quieres apartar tu sesion para ' + slotDateTimeLabel(slot) + '?'
+              : 'Confirmas que deseas reservar esta cita?' }}
+          </p>
+          <div>
+            <button class="btn btn-soft" type="button" [disabled]="bookingSaving()" (click)="cancelBookingConfirmation()">Cancelar</button>
+            <button class="btn btn-primary" type="button" [disabled]="bookingSaving()" (click)="continueBookingConfirmation()">
+              {{ bookingSaving() ? 'Agendando...' : bookingConfirmationStep() === 1 ? 'Continuar' : 'Reservar' }}
+            </button>
+          </div>
+        </aside>
+      }
+
+      @if (selectedAppointmentDetails(); as appointment) {
+        <aside class="appointment-detail" role="dialog" aria-modal="false" aria-label="Detalle de sesion">
+          <div class="detail-header">
+            <div>
+              <span class="status-pill">{{ statusLabel(appointment.status) }}</span>
+              <strong>Detalle de sesion</strong>
+            </div>
+            <button type="button" aria-label="Cerrar detalle" (click)="closeAppointmentDetails()">x</button>
+          </div>
+          <dl>
+            <div>
+              <dt>Fecha</dt>
+              <dd>{{ appointmentDateLabel(appointment.startAt) }}</dd>
+            </div>
+            <div>
+              <dt>Hora</dt>
+              <dd>{{ appointment.startAt | date: 'shortTime' }} - {{ appointment.endAt | date: 'shortTime' }}</dd>
+            </div>
+            <div>
+              <dt>Duracion</dt>
+              <dd>{{ appointmentDurationLabel(appointment) }}</dd>
+            </div>
+          </dl>
+          <button class="btn btn-primary" type="button" (click)="downloadCalendarInvite(appointment)">Agregar al calendario</button>
+        </aside>
+      }
+
       <section class="welcome">
         <div>
           <span class="status-pill">Portal paciente</span>
@@ -155,8 +224,8 @@ interface NotificationItem {
               }
             </div>
 
-            <button class="continue-button" type="button" [disabled]="!selectedSlot()" (click)="confirmSelectedSlot()">
-              Continuar <span>&rarr;</span>
+            <button class="continue-button" type="button" [disabled]="!selectedSlot() || bookingSaving()" (click)="confirmSelectedSlot()">
+              {{ bookingSaving() ? 'Agendando...' : 'Continuar' }} <span>&rarr;</span>
             </button>
           }
         </article>
@@ -165,13 +234,13 @@ interface NotificationItem {
           <h2>Proximas sesiones</h2>
           <div class="list">
             @for (appointment of upcomingAppointments(); track appointment._id) {
-              <div class="row">
+              <button class="row appointment-row" type="button" (click)="openAppointmentDetails(appointment)">
                 <div>
                   <strong>{{ appointmentDateLabel(appointment.startAt) }}</strong>
                   <span>{{ appointment.startAt | date: 'shortTime' }} - {{ appointment.endAt | date: 'shortTime' }}</span>
                 </div>
                 <span class="status-pill">{{ statusLabel(appointment.status) }}</span>
-              </div>
+              </button>
             } @empty {
               <p class="muted">No tienes sesiones proximas pendientes o confirmadas.</p>
             }
@@ -179,19 +248,41 @@ interface NotificationItem {
 
           <div class="history-block">
             <h3>Historial de sesiones</h3>
-            <div class="list">
-              @for (appointment of historicalAppointments(); track appointment._id) {
-                <div class="row history-row">
-                  <div>
-                    <strong>{{ appointmentDateLabel(appointment.startAt) }}</strong>
-                    <span>{{ appointment.startAt | date: 'shortTime' }} - {{ appointment.endAt | date: 'shortTime' }}</span>
-                  </div>
-                  <span class="status-pill">{{ statusLabel(appointment.status) }}</span>
+            @if (historicalSummary(); as summary) {
+              @if (summary.total) {
+                <div class="history-summary">
+                  <p>{{ summary.total }} {{ summary.total === 1 ? 'sesion en historial' : 'sesiones en historial' }}</p>
+                  @if (summary.latest; as latest) {
+                    <div class="row history-row">
+                      <div>
+                        <strong>Ultima sesion</strong>
+                        <span>{{ appointmentDateLabel(latest.startAt) }} · {{ latest.startAt | date: 'shortTime' }}</span>
+                      </div>
+                      <span class="status-pill">{{ statusLabel(latest.status) }}</span>
+                    </div>
+                  }
+                  <button class="btn btn-soft history-toggle" type="button" (click)="historyExpanded.set(!historyExpanded())">
+                    {{ historyExpanded() ? 'Ocultar historial' : 'Ver historial' }}
+                  </button>
                 </div>
-              } @empty {
+
+                @if (historyExpanded()) {
+                  <div class="list history-list">
+                    @for (appointment of historicalAppointments(); track appointment._id) {
+                      <div class="row history-row">
+                        <div>
+                          <strong>{{ appointmentDateLabel(appointment.startAt) }}</strong>
+                          <span>{{ appointment.startAt | date: 'shortTime' }} - {{ appointment.endAt | date: 'shortTime' }}</span>
+                        </div>
+                        <span class="status-pill">{{ statusLabel(appointment.status) }}</span>
+                      </div>
+                    }
+                  </div>
+                }
+              } @else {
                 <p class="muted">Aun no hay sesiones en tu historial.</p>
               }
-            </div>
+            }
           </div>
         </article>
       </section>
@@ -320,6 +411,130 @@ interface NotificationItem {
         color: #744058;
         line-height: 1.5;
         font-weight: 700;
+      }
+
+      .booking-toast,
+      .booking-confirm,
+      .appointment-detail {
+        position: fixed;
+        right: 22px;
+        top: 22px;
+        z-index: 30;
+        width: min(360px, calc(100vw - 32px));
+        border: 1px solid #f0c9d8;
+        border-left: 5px solid #d85f8d;
+        border-radius: 8px;
+        padding: 14px 16px;
+        background: #fff7fa;
+        box-shadow: 0 18px 45px rgba(112, 51, 76, 0.16);
+        color: #3e3439;
+      }
+
+      .booking-toast {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+        justify-content: space-between;
+      }
+
+      .booking-toast.success {
+        border-left-color: #4b9b76;
+        background: #f3fff9;
+      }
+
+      .booking-toast.error {
+        border-left-color: #b94777;
+        background: #fff4f7;
+      }
+
+      .booking-toast strong,
+      .booking-confirm strong,
+      .appointment-detail strong {
+        display: block;
+        margin-bottom: 4px;
+        color: #8d3159;
+        font-size: 15px;
+      }
+
+      .booking-toast p,
+      .booking-confirm p {
+        margin: 0;
+        color: #744058;
+        line-height: 1.45;
+        font-weight: 700;
+      }
+
+      .booking-toast button[aria-label],
+      .appointment-detail button[aria-label] {
+        width: 28px;
+        height: 28px;
+        border: 0;
+        border-radius: 8px;
+        background: #fce4ec;
+        color: #8d3159;
+        cursor: pointer;
+        font-size: 20px;
+        line-height: 1;
+      }
+
+      .booking-confirm {
+        display: grid;
+        gap: 10px;
+      }
+
+      .booking-confirm .status-pill {
+        width: max-content;
+      }
+
+      .booking-confirm > div {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+
+      .appointment-detail {
+        top: 118px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .detail-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+      }
+
+      .detail-header > div {
+        display: grid;
+        gap: 7px;
+      }
+
+      .appointment-detail dl {
+        display: grid;
+        gap: 10px;
+        margin: 0;
+      }
+
+      .appointment-detail dl > div {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        border-radius: 8px;
+        padding: 10px 12px;
+        background: #fff;
+      }
+
+      .appointment-detail dt {
+        color: #9b7890;
+        font-weight: 800;
+      }
+
+      .appointment-detail dd {
+        margin: 0;
+        color: #3e3439;
+        font-weight: 800;
+        text-align: right;
       }
 
       .layout {
@@ -656,16 +871,31 @@ interface NotificationItem {
 
       .row {
         display: flex;
+        width: 100%;
         justify-content: space-between;
+        align-items: center;
         gap: 12px;
         padding: 12px;
+        border: 0;
         border-radius: 8px;
         background: var(--gray-50);
+        color: inherit;
+        text-align: left;
       }
 
       .row div {
         display: grid;
         gap: 3px;
+      }
+
+      .appointment-row {
+        cursor: pointer;
+      }
+
+      .appointment-row:hover,
+      .appointment-row:focus-visible {
+        outline: 2px solid #f0c9d8;
+        background: #fff7fa;
       }
 
       .history-block {
@@ -680,6 +910,26 @@ interface NotificationItem {
 
       .history-row {
         background: #fff7fa;
+      }
+
+      .history-summary {
+        display: grid;
+        gap: 12px;
+      }
+
+      .history-summary p {
+        margin: 0;
+        color: var(--muted);
+        font-weight: 800;
+        line-height: 1.45;
+      }
+
+      .history-toggle {
+        justify-self: start;
+      }
+
+      .history-list {
+        margin-top: 12px;
       }
 
       .muted,
@@ -886,11 +1136,22 @@ interface NotificationItem {
           bottom: 12px;
         }
 
-        .chat-window {
-          width: calc(100vw - 24px);
-          height: min(620px, calc(100vh - 24px));
+          .chat-window {
+            width: calc(100vw - 24px);
+            height: min(620px, calc(100vh - 24px));
+          }
+
+          .booking-toast,
+          .booking-confirm,
+          .appointment-detail {
+            top: 12px;
+            right: 12px;
+          }
+
+          .appointment-detail {
+            top: 96px;
+          }
         }
-      }
     `,
   ],
 })
@@ -902,6 +1163,12 @@ export class PatientPortalComponent implements OnInit, OnDestroy {
   readonly selectedDate = signal(this.formatDateKey(new Date()));
   readonly visibleMonth = signal(new Date());
   readonly bookingOpen = signal(false);
+  readonly bookingSaving = signal(false);
+  readonly bookingNotice = signal<BookingNotice | null>(null);
+  readonly pendingBookingSlot = signal<Slot | null>(null);
+  readonly bookingConfirmationStep = signal(1);
+  readonly historyExpanded = signal(false);
+  readonly selectedAppointmentDetails = signal<Appointment | null>(null);
   readonly appointments = signal<Appointment[]>([]);
   readonly messages = signal<ChatMessage[]>([]);
   readonly chatOpen = signal(false);
@@ -942,6 +1209,15 @@ export class PatientPortalComponent implements OnInit, OnDestroy {
   }
 
   openBooking() {
+    const existingAppointment = this.nextActiveAppointment();
+    if (existingAppointment) {
+      this.showBookingNotice(
+        'Sesion ya agendada',
+        `Ya tienes una sesion agendada para ${this.appointmentDateTimeLabel(existingAppointment)}.`,
+        'info',
+      );
+      return;
+    }
     this.bookingOpen.set(true);
     this.loadMonthAvailability();
     this.loadSlots();
@@ -969,15 +1245,65 @@ export class PatientPortalComponent implements OnInit, OnDestroy {
   confirmSelectedSlot() {
     const slot = this.selectedSlot();
     if (!slot) return;
-    this.book(slot);
+    const existingAppointment = this.nextActiveAppointment();
+    if (existingAppointment) {
+      this.showBookingNotice(
+        'Sesion ya agendada',
+        `Ya tienes una sesion agendada para ${this.appointmentDateTimeLabel(existingAppointment)}.`,
+        'info',
+      );
+      return;
+    }
+    this.bookingNotice.set(null);
+    this.bookingConfirmationStep.set(1);
+    this.pendingBookingSlot.set(slot);
   }
 
   book(slot: Slot) {
-    this.api.post<Appointment>('/appointments', slot).subscribe(() => {
-      this.loadAppointments();
-      this.loadMonthAvailability();
-      this.loadSlots();
+    if (this.bookingSaving()) return;
+    this.bookingSaving.set(true);
+    this.api.post<Appointment>('/appointments', slot).subscribe({
+      next: () => {
+        this.bookingSaving.set(false);
+        this.pendingBookingSlot.set(null);
+        this.showBookingNotice('Sesion agendada', `Tu sesion quedo agendada para ${this.slotDateTimeLabel(slot)}.`, 'success');
+        this.loadAppointments();
+        this.loadMonthAvailability();
+        this.loadSlots();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.bookingSaving.set(false);
+        this.pendingBookingSlot.set(null);
+        const message = typeof error.error?.message === 'string' ? error.error.message : 'No se pudo agendar la sesion. Revisa tus citas activas e intenta de nuevo.';
+        this.showBookingNotice('No se pudo agendar', message, 'error');
+        this.loadAppointments();
+        this.loadMonthAvailability();
+        this.loadSlots();
+      },
     });
+  }
+
+  continueBookingConfirmation() {
+    const slot = this.pendingBookingSlot();
+    if (!slot) return;
+    if (this.bookingConfirmationStep() === 1) {
+      this.bookingConfirmationStep.set(2);
+      return;
+    }
+    this.book(slot);
+  }
+
+  cancelBookingConfirmation() {
+    this.pendingBookingSlot.set(null);
+    this.bookingConfirmationStep.set(1);
+  }
+
+  closeBookingNotice() {
+    this.bookingNotice.set(null);
+  }
+
+  showBookingNotice(title: string, message: string, tone: BookingNotice['tone']) {
+    this.bookingNotice.set({ title, message, tone });
   }
 
   selectDate(date: string) {
@@ -1060,6 +1386,23 @@ export class PatientPortalComponent implements OnInit, OnDestroy {
       .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
   }
 
+  nextActiveAppointment() {
+    return this.upcomingAppointments()[0] ?? null;
+  }
+
+  appointmentDateTimeLabel(appointment: Appointment) {
+    const start = new Date(appointment.startAt);
+    const end = new Date(appointment.endAt);
+    return `${this.appointmentDateLabel(appointment.startAt)} de ${start.toLocaleTimeString('es-MX', {
+      hour: '2-digit',
+      minute: '2-digit',
+    })} a ${end.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}`;
+  }
+
+  slotDateTimeLabel(slot: Slot) {
+    return this.appointmentDateTimeLabel({ _id: '', status: 'confirmed', startAt: slot.startAt, endAt: slot.endAt });
+  }
+
   historicalAppointments() {
     const now = Date.now();
     return this.appointments()
@@ -1068,6 +1411,80 @@ export class PatientPortalComponent implements OnInit, OnDestroy {
         return isPast || ['completed', 'cancelled', 'no_show'].includes(appointment.status);
       })
       .sort((a, b) => new Date(b.startAt).getTime() - new Date(a.startAt).getTime());
+  }
+
+  historicalSummary() {
+    const appointments = this.historicalAppointments();
+    return {
+      total: appointments.length,
+      latest: appointments[0] ?? null,
+    };
+  }
+
+  openAppointmentDetails(appointment: Appointment) {
+    this.selectedAppointmentDetails.set(appointment);
+  }
+
+  closeAppointmentDetails() {
+    this.selectedAppointmentDetails.set(null);
+  }
+
+  appointmentDurationLabel(appointment: Appointment) {
+    const start = new Date(appointment.startAt).getTime();
+    const end = new Date(appointment.endAt).getTime();
+    const minutes = Math.max(Math.round((end - start) / 60000), 0);
+    if (minutes < 60) {
+      return `${minutes} minutos`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes ? `${hours} h ${remainingMinutes} min` : `${hours} h`;
+  }
+
+  downloadCalendarInvite(appointment: Appointment) {
+    const content = this.buildIcsContent(appointment);
+    const blob = new Blob([content], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `sesion-psicologia-${this.formatDateKey(new Date(appointment.startAt))}.ics`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  buildIcsContent(appointment: Appointment) {
+    const start = new Date(appointment.startAt);
+    const end = new Date(appointment.endAt);
+    const created = new Date();
+    const summary = 'Sesion de psicologia';
+    const description = appointment.reason?.trim() || 'Sesion agendada desde el portal del paciente.';
+    const lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Itzel Portal//Appointments//ES',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'BEGIN:VEVENT',
+      `UID:${this.escapeIcsText(appointment._id || `${appointment.startAt}-${appointment.endAt}`)}@itzel-portal`,
+      `DTSTAMP:${this.formatIcsDate(created)}`,
+      `DTSTART:${this.formatIcsDate(start)}`,
+      `DTEND:${this.formatIcsDate(end)}`,
+      `SUMMARY:${this.escapeIcsText(summary)}`,
+      `DESCRIPTION:${this.escapeIcsText(description)}`,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ];
+    return `${lines.join('\r\n')}\r\n`;
+  }
+
+  formatIcsDate(date: Date) {
+    return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+  }
+
+  escapeIcsText(value: string) {
+    return value.replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;');
   }
 
   appointmentDateLabel(value: string) {
