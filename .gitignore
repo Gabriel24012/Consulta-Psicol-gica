@@ -7,3 +7,4 @@ coverage/
 .env.local
 *.log
 redis-data/
+apps/api/uploads/

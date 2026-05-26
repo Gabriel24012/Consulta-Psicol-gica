@@ -8,7 +8,7 @@ import timeGridPlugin from '@fullcalendar/timegrid';
 import { FullCalendarModule } from '@fullcalendar/angular';
 import { ApiService } from '../../core/api.service';
 
-type AdminTab = 'today' | 'calendar' | 'patients' | 'schedule' | 'quick-intake';
+type AdminTab = 'today' | 'calendar' | 'patients' | 'materials' | 'schedule' | 'quick-intake';
 type AppointmentStatus = 'pending' | 'confirmed' | 'cancelled' | 'completed' | 'no_show';
 
 interface Slot {
@@ -100,6 +100,32 @@ interface QuickIntakeResult {
   appointment?: AppointmentRow | null;
 }
 
+interface MaterialFile {
+  _id: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  createdAt?: string;
+}
+
+interface MaterialPatient {
+  _id: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+}
+
+interface MaterialSection {
+  _id: string;
+  title: string;
+  description?: string;
+  isActive: boolean;
+  fileCount: number;
+  releasedCount: number;
+  files: MaterialFile[];
+  releasedPatients: MaterialPatient[];
+}
+
 @Component({
   standalone: true,
   imports: [DatePipe, LowerCasePipe, ReactiveFormsModule, FullCalendarModule],
@@ -122,6 +148,7 @@ interface QuickIntakeResult {
         <button type="button" [class.active]="activeTab() === 'today'" (click)="activeTab.set('today')">Hoy</button>
         <button type="button" [class.active]="activeTab() === 'calendar'" (click)="activeTab.set('calendar')">Calendario</button>
         <button type="button" [class.active]="activeTab() === 'patients'" (click)="activeTab.set('patients')">Pacientes</button>
+        <button type="button" [class.active]="activeTab() === 'materials'" (click)="openMaterials()">Materiales</button>
         <button type="button" [class.active]="activeTab() === 'schedule'" (click)="activeTab.set('schedule')">Horarios</button>
         <button type="button" [class.active]="activeTab() === 'quick-intake'" (click)="openQuickIntake()">Alta paciente</button>
       </nav>
@@ -323,6 +350,157 @@ interface QuickIntakeResult {
                 <p class="empty-state">Sin alertas de seguimiento.</p>
               }
             </div>
+          </article>
+        </section>
+      }
+
+      @if (activeTab() === 'materials') {
+        <section class="materials-grid">
+          <article class="panel-card materials-builder">
+              <div class="panel-title">
+                <div>
+                  <span class="eyebrow">Biblioteca privada</span>
+                  <h2>Secciones de materiales</h2>
+                  <p>Organiza documentos y libera cada sección solo a los pacientes que correspondan.</p>
+                </div>
+                <span class="soft-count">{{ materialSections().length }} secciones</span>
+              </div>
+
+            <form class="materials-form" [formGroup]="materialSectionForm" (ngSubmit)="saveMaterialSection()">
+              <label class="field field-wide">
+                <span>Nombre de la sección</span>
+                <input class="input" formControlName="title" placeholder="Ej. Ansiedad, ejercicios de respiración">
+              </label>
+              <label class="field field-wide">
+                <span>Descripción</span>
+                <textarea class="input" rows="3" formControlName="description" placeholder="Notas visibles para organizar la sección"></textarea>
+              </label>
+              <div class="material-actions">
+                <button class="btn btn-primary" type="submit" [disabled]="materialSectionForm.invalid || materialBusy()">
+                  {{ editingMaterialSectionId() ? 'Actualizar sección' : 'Crear sección' }}
+                </button>
+                @if (editingMaterialSectionId()) {
+                  <button class="btn btn-soft" type="button" (click)="cancelMaterialEdit()">Cancelar edición</button>
+                }
+              </div>
+            </form>
+
+            @if (materialMessage()) {
+              <p class="save-message" [class.error-message]="materialError()">{{ materialMessage() }}</p>
+            }
+
+            <div class="material-section-list">
+              @for (section of materialSections(); track section._id) {
+                <button
+                  type="button"
+                  class="material-section-row"
+                  [class.selected]="selectedMaterialSectionId() === section._id"
+                  [class.inactive]="!section.isActive"
+                  (click)="selectMaterialSection(section)"
+                >
+                  <span>
+                    <strong>{{ section.title }}</strong>
+                    <small>{{ section.fileCount }} archivos · {{ section.releasedCount }} pacientes</small>
+                  </span>
+                  <b>{{ section.isActive ? 'Activa' : 'Desactivada' }}</b>
+                </button>
+              } @empty {
+                <p class="empty-state">Crea la primera sección para organizar PDFs y documentos.</p>
+              }
+            </div>
+          </article>
+
+          <article class="panel-card materials-detail">
+            @if (selectedMaterialSection(); as section) {
+              <div class="panel-title">
+                <div>
+                  <span class="eyebrow">Detalle</span>
+                  <h2>{{ section.title }}</h2>
+                  @if (section.description) {
+                    <p>{{ section.description }}</p>
+                  }
+                </div>
+                <div class="material-actions">
+                  <button class="btn btn-soft" type="button" (click)="editMaterialSection(section)">Editar</button>
+                  @if (section.isActive) {
+                    <button class="btn btn-danger-soft" type="button" (click)="deactivateMaterialSection(section)">Desactivar</button>
+                  }
+                </div>
+              </div>
+
+              <div class="upload-box">
+                <div>
+                  <strong>Subir archivos</strong>
+                  <small>PDF, DOC o DOCX · máximo 20 MB por archivo</small>
+                </div>
+                <input type="file" multiple accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" (change)="uploadMaterialFiles(section, $event)">
+              </div>
+
+              <div class="material-files">
+                @for (file of section.files; track file._id) {
+                  <div class="material-file-row">
+                    <div>
+                      <strong>{{ file.originalName }}</strong>
+                      <small>{{ materialFileLabel(file) }}</small>
+                    </div>
+                    <div>
+                      <button class="mini-button" type="button" (click)="downloadMaterialFile(file)">Descargar</button>
+                      <button class="mini-button danger" type="button" (click)="deleteMaterialFile(file)">Eliminar</button>
+                    </div>
+                  </div>
+                } @empty {
+                  <p class="empty-state">Esta sección aún no tiene archivos.</p>
+                }
+              </div>
+
+              <div class="release-panel">
+                <div class="panel-title compact">
+                  <h2>Liberar a pacientes</h2>
+                  <span class="soft-count">{{ section.releasedPatients.length }} con acceso</span>
+                </div>
+                <div class="patient-release-list">
+                  @for (patient of patients(); track patient._id) {
+                    <label class="release-row">
+                      <input
+                        type="checkbox"
+                        [checked]="materialPatientHasAccess(section, patient._id) || selectedReleasePatientIds().has(patient._id)"
+                        [disabled]="materialPatientHasAccess(section, patient._id)"
+                        (change)="toggleReleasePatient(patient._id, $event)"
+                      >
+                      <span>
+                        <strong>{{ patient.name }}</strong>
+                        <small>{{ patientContactLabel(patient) }}</small>
+                      </span>
+                      @if (materialPatientHasAccess(section, patient._id)) {
+                        <b>Con acceso</b>
+                      }
+                    </label>
+                  }
+                </div>
+                <button class="btn btn-primary" type="button" [disabled]="!selectedReleasePatientIds().size || materialBusy()" (click)="releaseSelectedPatients(section)">
+                  Liberar sección
+                </button>
+
+                <div class="released-list">
+                  @if (section.releasedPatients.length) {
+                    <span class="release-subtitle">Pacientes con acceso</span>
+                  }
+                  @for (patient of section.releasedPatients; track patient._id) {
+                    <div class="inactive-row">
+                      <div>
+                        <strong>{{ patient.name ?? 'Paciente' }}</strong>
+                        <small>{{ patient.email || patient.phone || 'Sin contacto' }}</small>
+                      </div>
+                      <button class="mini-button" type="button" (click)="revokeMaterial(section, patient._id)">Revocar</button>
+                    </div>
+                  } @empty {
+                    <p class="empty-state">Ningún paciente tiene esta sección liberada.</p>
+                  }
+                </div>
+              </div>
+            } @else {
+              <p class="empty-state">Selecciona una sección para subir archivos y liberar acceso.</p>
+            }
           </article>
         </section>
       }
@@ -904,7 +1082,8 @@ interface QuickIntakeResult {
       }
 
       .today-grid,
-      .patients-grid {
+      .patients-grid,
+      .materials-grid {
         display: grid;
         grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.75fr);
         gap: 18px;
@@ -1052,6 +1231,247 @@ interface QuickIntakeResult {
         margin: 8px 0 0;
         color: #4a3740;
         font-size: 24px;
+      }
+
+      .materials-grid {
+        grid-template-columns: minmax(360px, 0.72fr) minmax(620px, 1fr);
+        gap: 22px;
+      }
+
+      .materials-builder,
+      .materials-detail {
+        width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
+        overflow: hidden;
+        box-shadow: 0 18px 46px rgba(80, 62, 72, 0.08);
+      }
+
+      .materials-form,
+      .materials-detail,
+      .release-panel {
+        display: grid;
+        gap: 16px;
+      }
+
+      .materials-form {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+        align-items: end;
+        border: 1px solid #f0dce4;
+        border-radius: 8px;
+        padding: 14px;
+        background: #fffafb;
+      }
+
+      .materials-form .field {
+        margin: 0;
+      }
+
+      .materials-form textarea {
+        min-height: 50px;
+        resize: vertical;
+      }
+
+      .material-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        justify-content: flex-end;
+      }
+
+      .materials-form .material-actions {
+        align-self: stretch;
+      }
+
+      .materials-form .material-actions .btn {
+        min-height: 50px;
+        white-space: nowrap;
+      }
+
+      .material-section-list,
+      .material-files,
+      .released-list,
+      .patient-release-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .material-section-row,
+      .material-file-row,
+      .release-row {
+        box-sizing: border-box;
+        min-width: 0;
+        max-width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 16px;
+        background: #fff;
+        color: var(--text);
+        text-align: left;
+      }
+
+      .material-section-row {
+        cursor: pointer;
+        transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+      }
+
+      .material-section-row.selected {
+        border-color: #d85f8d;
+        background: #fff8fb;
+        box-shadow: inset 4px 0 0 #d85f8d;
+      }
+
+      .material-section-row.inactive {
+        opacity: 0.62;
+      }
+
+      .material-section-row strong,
+      .material-file-row strong,
+      .release-row strong {
+        display: block;
+        color: #4a3740;
+      }
+
+      .material-section-row small,
+      .material-file-row small,
+      .release-row small,
+      .upload-box small {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-weight: 750;
+      }
+
+      .material-file-row > div:last-child {
+        display: flex;
+        flex: 0 0 auto;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .material-file-row {
+        flex-wrap: wrap;
+        background: #fff;
+      }
+
+      .material-file-row strong {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+
+      .mini-button.danger {
+        border-color: #f2c8c8;
+        background: #fff1f1;
+        color: #934242;
+      }
+
+      .upload-box {
+        box-sizing: border-box;
+        min-width: 0;
+        max-width: 100%;
+        display: grid;
+        grid-template-columns: 1fr;
+        align-items: start;
+        gap: 14px;
+        border: 1px dashed #e4bdcc;
+        border-radius: 8px;
+        padding: 16px;
+        background: linear-gradient(180deg, #fff, #fff8fb);
+      }
+
+      .upload-box strong {
+        display: block;
+        color: #4a3740;
+      }
+
+      .upload-box input {
+        min-width: 0;
+        width: 100%;
+        max-width: none;
+        color: var(--muted);
+        font-weight: 750;
+      }
+
+      .upload-box input::file-selector-button {
+        min-height: 38px;
+        margin-right: 10px;
+        border: 1px solid #eed7df;
+        border-radius: 8px;
+        padding: 0 12px;
+        background: #fff;
+        color: #743650;
+        cursor: pointer;
+        font-weight: 850;
+      }
+
+      .release-panel {
+        border-top: 1px solid var(--border);
+        padding-top: 18px;
+      }
+
+      .patient-release-list {
+        min-width: 0;
+        max-width: 100%;
+        max-height: 260px;
+        overflow: auto;
+        padding: 4px 0;
+      }
+
+      .release-row {
+        justify-content: flex-start;
+        min-height: 64px;
+        padding: 12px 14px;
+        background: #fff;
+      }
+
+      .release-row span {
+        min-width: 0;
+      }
+
+      .release-row small {
+        overflow-wrap: anywhere;
+      }
+
+      .release-row b {
+        margin-left: auto;
+        border-radius: 999px;
+        padding: 5px 9px;
+        background: #eef8f1;
+        color: #2f6f44;
+        font-size: 12px;
+        font-weight: 900;
+        white-space: nowrap;
+      }
+
+      .release-row input {
+        width: 18px;
+        height: 18px;
+        accent-color: #d85f8d;
+      }
+
+      .release-panel > .btn-primary {
+        justify-self: start;
+        min-width: 220px;
+      }
+
+      .release-subtitle {
+        display: block;
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+      }
+
+      .released-list .inactive-row {
+        border: 1px solid var(--border);
+        background: #fff;
       }
 
       .panel-title.compact h2 {
@@ -1278,7 +1698,8 @@ interface QuickIntakeResult {
         font-weight: 800;
       }
 
-      .patients-grid {
+      .patients-grid,
+      .materials-grid {
         grid-template-columns: minmax(0, 1fr) minmax(320px, 0.55fr);
       }
 
@@ -1922,11 +2343,33 @@ interface QuickIntakeResult {
         color: #934242;
       }
 
+      @media (max-width: 1320px) {
+        .materials-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .materials-detail {
+          max-width: none;
+        }
+      }
+
       @media (max-width: 1080px) {
         .today-grid,
         .patients-grid,
         .metric-strip {
           grid-template-columns: 1fr;
+        }
+
+        .materials-form {
+          grid-template-columns: 1fr;
+        }
+
+        .upload-box {
+          grid-template-columns: 1fr;
+        }
+
+        .upload-box input {
+          max-width: none;
         }
 
         .metric-strip {
@@ -1942,9 +2385,44 @@ interface QuickIntakeResult {
         .admin-hero,
         .next-content,
         .panel-title,
+        .material-file-row,
         .inactive-row {
           align-items: stretch;
           flex-direction: column;
+        }
+
+        .materials-builder,
+        .materials-detail {
+          padding: 16px;
+        }
+
+        .materials-form,
+        .upload-box {
+          padding: 12px;
+        }
+
+        .material-actions {
+          justify-content: stretch;
+        }
+
+        .material-actions .btn,
+        .material-file-row .mini-button,
+        .release-panel > .btn-primary {
+          width: 100%;
+        }
+
+        .material-file-row > div:last-child {
+          width: 100%;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .release-row {
+          align-items: flex-start;
+        }
+
+        .release-row b {
+          margin-left: 0;
         }
 
         .workspace-tabs {
@@ -2084,6 +2562,13 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   readonly patientScheduleSelectedDate = signal(this.formatDateKey(new Date()));
   readonly patientScheduleVisibleMonth = signal(new Date());
   readonly patientScheduleAvailableDayKeys = signal<Set<string>>(new Set());
+  readonly materialSections = signal<MaterialSection[]>([]);
+  readonly selectedMaterialSectionId = signal<string | null>(null);
+  readonly editingMaterialSectionId = signal<string | null>(null);
+  readonly selectedReleasePatientIds = signal<Set<string>>(new Set());
+  readonly materialMessage = signal('');
+  readonly materialError = signal(false);
+  readonly materialBusy = signal(false);
   readonly weekdays = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'];
 
   readonly search = this.fb.control('');
@@ -2100,6 +2585,10 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   readonly quickIntakeForm = this.fb.group({
     name: ['', [Validators.required]],
     scheduleNow: [false],
+  });
+  readonly materialSectionForm = this.fb.group({
+    title: ['', [Validators.required]],
+    description: [''],
   });
 
   readonly sortedAppointments = computed(() =>
@@ -2137,6 +2626,9 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       const patientId = patient.userId?._id;
       return !patientId || !this.scheduledPatientIds().has(patientId);
     }),
+  );
+  readonly selectedMaterialSection = computed(() =>
+    this.materialSections().find((section) => section._id === this.selectedMaterialSectionId()) ?? null,
   );
 
   readonly confirmedTodayCount = computed(() => this.todayAppointments().filter((appointment) => appointment.status === 'confirmed').length);
@@ -2203,11 +2695,192 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.loadSuggestions();
     this.api.get<{ sub: string }>('/auth/me').subscribe((user) => this.currentAdminId.set(user.sub));
     this.loadConversations();
+    this.loadMaterialSections();
   }
 
   loadPatients() {
     const search = this.search.value ?? '';
     this.api.get<PatientRow[]>(`/patients?search=${encodeURIComponent(search)}`).subscribe((patients) => this.patients.set(patients));
+  }
+
+  openMaterials() {
+    this.activeTab.set('materials');
+    this.loadMaterialSections();
+    if (!this.patients().length) {
+      this.loadPatients();
+    }
+  }
+
+  loadMaterialSections() {
+    this.api.get<MaterialSection[]>('/materials/sections').subscribe({
+      next: (sections) => {
+        this.materialSections.set(sections);
+        const selectedId = this.selectedMaterialSectionId();
+        if (selectedId && !sections.some((section) => section._id === selectedId)) {
+          this.selectedMaterialSectionId.set(sections[0]?._id ?? null);
+        }
+      },
+      error: () => {
+        this.materialError.set(true);
+        this.materialMessage.set('No se pudieron cargar los materiales.');
+      },
+    });
+  }
+
+  selectMaterialSection(section: MaterialSection) {
+    this.selectedMaterialSectionId.set(section._id);
+    this.selectedReleasePatientIds.set(new Set());
+  }
+
+  saveMaterialSection() {
+    if (this.materialSectionForm.invalid) return;
+    this.materialBusy.set(true);
+    this.materialError.set(false);
+    this.materialMessage.set('');
+    const payload = this.materialSectionForm.getRawValue();
+    const request = this.editingMaterialSectionId()
+      ? this.api.patch<MaterialSection>(`/materials/sections/${this.editingMaterialSectionId()}`, payload)
+      : this.api.post<MaterialSection>('/materials/sections', payload);
+    request.subscribe({
+      next: (section) => {
+        this.materialBusy.set(false);
+        this.materialMessage.set(this.editingMaterialSectionId() ? 'Sección actualizada.' : 'Sección creada.');
+        this.selectedMaterialSectionId.set(section._id);
+        this.cancelMaterialEdit();
+        this.loadMaterialSections();
+      },
+      error: (error) => this.setMaterialError(error, 'No se pudo guardar la sección.'),
+    });
+  }
+
+  editMaterialSection(section: MaterialSection) {
+    this.editingMaterialSectionId.set(section._id);
+    this.materialSectionForm.patchValue({
+      title: section.title,
+      description: section.description ?? '',
+    });
+  }
+
+  cancelMaterialEdit() {
+    this.editingMaterialSectionId.set(null);
+    this.materialSectionForm.reset({ title: '', description: '' });
+  }
+
+  deactivateMaterialSection(section: MaterialSection) {
+    if (!confirm(`¿Desactivar la sección "${section.title}"? Los pacientes dejarán de verla.`)) return;
+    this.materialBusy.set(true);
+    this.api.delete<MaterialSection>(`/materials/sections/${section._id}`).subscribe({
+      next: () => {
+        this.materialBusy.set(false);
+        this.materialMessage.set('Sección desactivada.');
+        this.loadMaterialSections();
+      },
+      error: (error) => this.setMaterialError(error, 'No se pudo desactivar la sección.'),
+    });
+  }
+
+  uploadMaterialFiles(section: MaterialSection, event: Event) {
+    const input = event.target as HTMLInputElement;
+    const files = Array.from(input.files ?? []);
+    if (!files.length) return;
+    const formData = new FormData();
+    files.forEach((file) => formData.append('files', file));
+    this.materialBusy.set(true);
+    this.materialError.set(false);
+    this.materialMessage.set('');
+    this.api.post<MaterialFile[]>(`/materials/sections/${section._id}/files`, formData).subscribe({
+      next: () => {
+        this.materialBusy.set(false);
+        this.materialMessage.set('Archivos cargados.');
+        input.value = '';
+        this.loadMaterialSections();
+      },
+      error: (error) => {
+        input.value = '';
+        this.setMaterialError(error, 'No se pudieron subir los archivos.');
+      },
+    });
+  }
+
+  deleteMaterialFile(file: MaterialFile) {
+    if (!confirm(`¿Eliminar "${file.originalName}"?`)) return;
+    this.materialBusy.set(true);
+    this.api.delete<{ ok: boolean }>(`/materials/files/${file._id}`).subscribe({
+      next: () => {
+        this.materialBusy.set(false);
+        this.materialMessage.set('Archivo eliminado.');
+        this.loadMaterialSections();
+      },
+      error: (error) => this.setMaterialError(error, 'No se pudo eliminar el archivo.'),
+    });
+  }
+
+  downloadMaterialFile(file: MaterialFile) {
+    window.open(`/api/materials/files/${file._id}/download`, '_blank');
+  }
+
+  toggleReleasePatient(patientId: string, event: Event) {
+    const checked = (event.target as HTMLInputElement).checked;
+    const next = new Set(this.selectedReleasePatientIds());
+    if (checked) {
+      next.add(patientId);
+    } else {
+      next.delete(patientId);
+    }
+    this.selectedReleasePatientIds.set(next);
+  }
+
+  materialPatientHasAccess(section: MaterialSection, patientId: string) {
+    return section.releasedPatients.some((patient) => patient?._id === patientId);
+  }
+
+  releaseSelectedPatients(section: MaterialSection) {
+    const patientIds = Array.from(this.selectedReleasePatientIds());
+    if (!patientIds.length) return;
+    this.materialBusy.set(true);
+    this.api.post<{ ok: boolean; releasedCount: number }>(`/materials/sections/${section._id}/release`, { patientIds }).subscribe({
+      next: (result) => {
+        this.materialBusy.set(false);
+        this.materialMessage.set(result.releasedCount ? 'Sección liberada.' : 'Los pacientes seleccionados ya tenían acceso.');
+        this.selectedReleasePatientIds.set(new Set());
+        this.loadMaterialSections();
+      },
+      error: (error) => this.setMaterialError(error, 'No se pudo liberar la sección.'),
+    });
+  }
+
+  revokeMaterial(section: MaterialSection, patientId: string) {
+    this.materialBusy.set(true);
+    this.api.post<{ ok: boolean; revokedCount: number }>(`/materials/sections/${section._id}/revoke`, { patientIds: [patientId] }).subscribe({
+      next: () => {
+        this.materialBusy.set(false);
+        this.materialMessage.set('Acceso revocado.');
+        this.loadMaterialSections();
+      },
+      error: (error) => this.setMaterialError(error, 'No se pudo revocar el acceso.'),
+    });
+  }
+
+  materialFileLabel(file: MaterialFile) {
+    return `${this.materialKind(file)} · ${this.formatBytes(file.size)}`;
+  }
+
+  materialKind(file: MaterialFile) {
+    if (file.mimeType === 'application/pdf') return 'PDF';
+    if (file.mimeType.includes('wordprocessingml')) return 'DOCX';
+    if (file.mimeType.includes('msword')) return 'DOC';
+    return 'Archivo';
+  }
+
+  formatBytes(size: number) {
+    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
+  }
+
+  private setMaterialError(error: any, fallback: string) {
+    this.materialBusy.set(false);
+    this.materialError.set(true);
+    this.materialMessage.set(this.apiErrorMessage(error, fallback));
   }
 
   loadInactivePatients() {

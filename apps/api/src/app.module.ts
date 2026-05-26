@@ -12,6 +12,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { AvailabilityModule } from './modules/availability/availability.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { MessagesModule } from './modules/messages/messages.module';
+import { MaterialsModule } from './modules/materials/materials.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { PatientsModule } from './modules/patients/patients.module';
 import { PatientInvitationsModule } from './modules/patient-invitations/patient-invitations.module';
@@ -46,6 +47,7 @@ import { WhatsappModule } from './modules/whatsapp/whatsapp.module';
     AuthModule,
     AvailabilityModule,
     AppointmentsModule,
+    MaterialsModule,
     NotificationsModule,
     MessagesModule,
     SuggestionsModule,

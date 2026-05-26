@@ -41,6 +41,21 @@ interface NotificationItem {
   createdAt?: string;
 }
 
+interface MaterialFile {
+  _id: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  createdAt?: string;
+}
+
+interface MaterialSection {
+  _id: string;
+  title: string;
+  description?: string;
+  files: MaterialFile[];
+}
+
 interface BookingNotice {
   title: string;
   message: string;
@@ -314,6 +329,44 @@ interface BookingNotice {
           }
           </div>
         </article>
+
+        <section class="materials-panel card">
+          <div class="materials-header">
+            <div>
+              <span class="status-pill">Materiales</span>
+              <h2>Biblioteca asignada</h2>
+            </div>
+            <button class="btn btn-soft" type="button" (click)="loadMaterials()">Actualizar</button>
+          </div>
+
+          <div class="materials-list">
+            @for (section of materialSections(); track section._id) {
+              <article class="material-section">
+                <div>
+                  <h3>{{ section.title }}</h3>
+                  @if (section.description) {
+                    <p>{{ section.description }}</p>
+                  }
+                </div>
+                <div class="material-files">
+                  @for (file of section.files; track file._id) {
+                    <button class="material-file" type="button" (click)="downloadMaterial(file)">
+                      <span>
+                        <strong>{{ file.originalName }}</strong>
+                        <small>{{ materialFileLabel(file) }}</small>
+                      </span>
+                      <b>Descargar</b>
+                    </button>
+                  } @empty {
+                    <p class="muted">Esta sección aún no tiene archivos disponibles.</p>
+                  }
+                </div>
+              </article>
+            } @empty {
+              <p class="muted">Aún no tienes materiales asignados.</p>
+            }
+          </div>
+        </section>
 
         <article class="card panel">
           <h2>Sugerencias o comentarios</h2>
@@ -601,6 +654,82 @@ interface BookingNotice {
 
       .panel {
         padding: 22px;
+      }
+
+      .materials-panel {
+        margin-top: 18px;
+        padding: 22px;
+      }
+
+      .materials-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 16px;
+      }
+
+      .materials-header h2 {
+        margin: 8px 0 0;
+        color: #3e3439;
+        font-size: 24px;
+      }
+
+      .materials-list,
+      .material-section,
+      .material-files {
+        display: grid;
+        gap: 12px;
+      }
+
+      .material-section {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 16px;
+        background: #fffafb;
+      }
+
+      .material-section h3 {
+        margin: 0 0 6px;
+        color: #4a3740;
+        font-size: 20px;
+      }
+
+      .material-section p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.45;
+        font-weight: 700;
+      }
+
+      .material-file {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 13px;
+        background: var(--white);
+        color: var(--text);
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .material-file strong,
+      .material-file small {
+        display: block;
+      }
+
+      .material-file small {
+        margin-top: 4px;
+        color: var(--muted);
+        font-weight: 750;
+      }
+
+      .material-file b {
+        color: #8d3159;
       }
 
       .booking-panel {
@@ -1131,6 +1260,12 @@ interface BookingNotice {
           gap: 8px;
         }
 
+        .materials-header,
+        .material-file {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
         .chat-dock {
           right: 12px;
           bottom: 12px;
@@ -1174,6 +1309,7 @@ export class PatientPortalComponent implements OnInit, OnDestroy {
   readonly chatOpen = signal(false);
   readonly suggestions = signal<Suggestion[]>([]);
   readonly notifications = signal<NotificationItem[]>([]);
+  readonly materialSections = signal<MaterialSection[]>([]);
   readonly chatStatus = signal('');
   readonly chatError = signal(false);
   readonly suggestionStatus = signal('');
@@ -1197,6 +1333,7 @@ export class PatientPortalComponent implements OnInit, OnDestroy {
     this.loadMessages();
     this.loadSuggestions();
     this.loadNotifications();
+    this.loadMaterials();
     this.notificationRefreshId = setInterval(() => this.loadNotifications(), 30000);
     this.loadMonthAvailability();
     this.loadSlots();
@@ -1558,6 +1695,33 @@ export class PatientPortalComponent implements OnInit, OnDestroy {
       next: (notifications) => this.notifications.set(notifications),
       error: () => this.notifications.set([]),
     });
+  }
+
+  loadMaterials() {
+    this.api.get<MaterialSection[]>('/materials/me').subscribe({
+      next: (sections) => this.materialSections.set(sections),
+      error: () => this.materialSections.set([]),
+    });
+  }
+
+  downloadMaterial(file: MaterialFile) {
+    window.open(`/api/materials/files/${file._id}/download`, '_blank');
+  }
+
+  materialFileLabel(file: MaterialFile) {
+    return `${this.materialKind(file)} · ${this.formatBytes(file.size)}`;
+  }
+
+  materialKind(file: MaterialFile) {
+    if (file.mimeType === 'application/pdf') return 'PDF';
+    if (file.mimeType.includes('wordprocessingml')) return 'DOCX';
+    if (file.mimeType.includes('msword')) return 'DOC';
+    return 'Archivo';
+  }
+
+  formatBytes(size: number) {
+    if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+    return `${(size / 1024 / 1024).toFixed(1)} MB`;
   }
 
   unreadNotificationsCount() {
