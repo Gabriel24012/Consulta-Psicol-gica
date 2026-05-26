@@ -1,11 +1,13 @@
 import { DatePipe, LowerCasePipe } from '@angular/common';
 import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
 import { CalendarOptions, EventClickArg, EventInput } from '@fullcalendar/core';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import { FullCalendarModule } from '@fullcalendar/angular';
+import { Subscription } from 'rxjs';
 import { ApiService } from '../../core/api.service';
 
 type AdminTab = 'today' | 'calendar' | 'patients' | 'materials' | 'schedule' | 'quick-intake';
@@ -145,12 +147,12 @@ interface MaterialSection {
       </section>
 
       <nav class="workspace-tabs" aria-label="Secciones administrativas">
-        <button type="button" [class.active]="activeTab() === 'today'" (click)="activeTab.set('today')">Hoy</button>
-        <button type="button" [class.active]="activeTab() === 'calendar'" (click)="activeTab.set('calendar')">Calendario</button>
-        <button type="button" [class.active]="activeTab() === 'patients'" (click)="activeTab.set('patients')">Pacientes</button>
-        <button type="button" [class.active]="activeTab() === 'materials'" (click)="openMaterials()">Materiales</button>
-        <button type="button" [class.active]="activeTab() === 'schedule'" (click)="activeTab.set('schedule')">Horarios</button>
-        <button type="button" [class.active]="activeTab() === 'quick-intake'" (click)="openQuickIntake()">Alta paciente</button>
+        <button type="button" [class.active]="activeTab() === 'today'" (click)="selectAdminTab('today')">Hoy</button>
+        <button type="button" [class.active]="activeTab() === 'calendar'" (click)="selectAdminTab('calendar')">Calendario</button>
+        <button type="button" [class.active]="activeTab() === 'patients'" (click)="selectAdminTab('patients')">Pacientes</button>
+        <button type="button" [class.active]="activeTab() === 'materials'" (click)="selectAdminTab('materials')">Materiales</button>
+        <button type="button" [class.active]="activeTab() === 'schedule'" (click)="selectAdminTab('schedule')">Horarios</button>
+        <button type="button" [class.active]="activeTab() === 'quick-intake'" (click)="selectAdminTab('quick-intake')">Alta paciente</button>
       </nav>
 
       @if (activeTab() === 'today') {
@@ -2426,8 +2428,56 @@ interface MaterialSection {
         }
 
         .workspace-tabs {
-          top: 0;
-          overflow-x: auto;
+          display: none;
+        }
+
+        .quick-intake-grid {
+          grid-template-columns: 1fr;
+          gap: 14px;
+        }
+
+        .quick-intake-panel,
+        .quick-link-panel {
+          width: 100%;
+          min-width: 0;
+          padding: 18px;
+        }
+
+        .quick-intake-panel .panel-title,
+        .quick-link-panel .panel-title {
+          gap: 8px;
+        }
+
+        .quick-intake-panel .panel-title h2,
+        .quick-link-panel .panel-title h2 {
+          font-size: 26px;
+          line-height: 1.12;
+        }
+
+        .quick-intake-panel .panel-title p,
+        .quick-link-panel .empty-state {
+          font-size: 16px;
+          line-height: 1.45;
+        }
+
+        .quick-intake-form .btn-primary,
+        .generated-link .btn {
+          width: 100%;
+          justify-content: center;
+        }
+
+        .quick-schedule-box {
+          padding: 12px;
+        }
+
+        .quick-schedule-box .month-nav,
+        .quick-schedule-box .time-section {
+          min-width: 0;
+        }
+
+        .generated-link .hero-actions {
+          display: grid;
+          grid-template-columns: 1fr;
         }
 
         .metric-strip,
@@ -2435,6 +2485,70 @@ interface MaterialSection {
         .week-rules,
         .patient-snapshot {
           grid-template-columns: 1fr;
+        }
+
+        .detail-drawer {
+          inset: 10px;
+          width: auto;
+          height: auto;
+          max-height: calc(100dvh - 20px);
+          gap: 14px;
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 16px;
+          box-shadow: 0 24px 70px rgba(80, 62, 72, 0.24);
+        }
+
+        .detail-drawer header {
+          align-items: flex-start;
+          gap: 10px;
+        }
+
+        .detail-drawer header > div {
+          min-width: 0;
+        }
+
+        .detail-drawer h2 {
+          font-size: 25px;
+          line-height: 1.12;
+          overflow-wrap: anywhere;
+        }
+
+        .detail-drawer .dock-icon {
+          flex: 0 0 auto;
+        }
+
+        .drawer-status,
+        .drawer-actions {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .drawer-actions button,
+        .notes-form .btn,
+        .pending-profile .btn,
+        .admin-reschedule .btn-primary {
+          width: 100%;
+          justify-content: center;
+        }
+
+        .admin-reschedule {
+          min-width: 0;
+        }
+
+        .admin-reschedule .mini-calendar,
+        .admin-reschedule .time-section {
+          min-width: 0;
+        }
+
+        .admin-reschedule .month-nav strong {
+          font-size: 16px;
+          text-align: center;
+        }
+
+        .admin-reschedule .calendar-grid button {
+          width: 30px;
+          height: 30px;
         }
 
         .timeline::before {
@@ -2463,18 +2577,71 @@ interface MaterialSection {
           grid-column: 2;
         }
 
-        .calendar-panel ::ng-deep .fc {
-          display: none;
+        .calendar-panel {
+          overflow: hidden;
+          padding: 12px;
         }
 
-        .calendar-panel::after {
-          content: 'En móvil, el timeline es la vista principal para evitar saturación visual.';
+        .calendar-panel ::ng-deep .fc {
           display: block;
-          border-radius: 8px;
-          padding: 16px;
-          background: #fff7fa;
-          color: #74475a;
-          font-weight: 850;
+          width: 100%;
+          max-width: 100%;
+          font-size: 12px;
+        }
+
+        .calendar-panel ::ng-deep .fc-view-harness,
+        .calendar-panel ::ng-deep .fc-scrollgrid,
+        .calendar-panel ::ng-deep table {
+          width: 100% !important;
+          max-width: 100%;
+        }
+
+        .calendar-panel ::ng-deep .fc-scrollgrid table {
+          table-layout: fixed;
+        }
+
+        .calendar-panel ::ng-deep .fc-header-toolbar {
+          align-items: stretch;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .calendar-panel ::ng-deep .fc-toolbar-chunk {
+          display: flex;
+          justify-content: center;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+
+        .calendar-panel ::ng-deep .fc-toolbar-title {
+          font-size: 18px;
+          text-align: center;
+        }
+
+        .calendar-panel ::ng-deep .fc-button {
+          padding: 6px 9px;
+          font-size: 12px;
+        }
+
+        .calendar-panel ::ng-deep .fc-col-header-cell-cushion,
+        .calendar-panel ::ng-deep .fc-timegrid-slot-label-cushion {
+          font-size: 11px;
+        }
+
+        .calendar-panel ::ng-deep .fc-timegrid-axis {
+          width: 32px;
+        }
+
+        .calendar-panel ::ng-deep .fc-event {
+          padding: 2px 3px;
+          font-size: 10px;
+          line-height: 1.15;
+        }
+
+        .calendar-panel ::ng-deep .fc-event-title,
+        .calendar-panel ::ng-deep .fc-event-time {
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
 
         .chat-dock,
@@ -2490,9 +2657,18 @@ interface MaterialSection {
           bottom: 76px;
         }
 
+        .chat-dock.open,
+        .suggestions-dock.open {
+          inset: 10px;
+          right: 10px;
+          bottom: 10px;
+          max-width: none;
+          max-height: none;
+        }
+
         .chat-window {
-          width: calc(100vw - 24px);
-          height: min(650px, calc(100dvh - 24px));
+          width: 100%;
+          height: 100%;
         }
 
         .chat-body {
@@ -2504,6 +2680,35 @@ interface MaterialSection {
           max-height: 150px;
           border-right: 0;
           border-bottom: 1px solid var(--border);
+        }
+
+        .thread-panel {
+          padding: 12px;
+        }
+
+        .compose-admin {
+          grid-template-columns: 1fr;
+        }
+
+        .compose-admin .btn {
+          width: 100%;
+        }
+
+        .suggestions-window {
+          width: 100%;
+          height: 100%;
+          max-height: none;
+          display: grid;
+          grid-template-rows: auto minmax(0, 1fr);
+        }
+
+        .suggestions-tray {
+          max-height: none;
+          min-height: 0;
+        }
+
+        .suggestion-card .btn {
+          width: 100%;
         }
       }
     `,
@@ -2596,6 +2801,8 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   );
 
   private readonly inactiveAppointmentStatuses: AppointmentStatus[] = ['cancelled', 'completed', 'no_show'];
+  private readonly adminTabs: AdminTab[] = ['today', 'calendar', 'patients', 'materials', 'schedule', 'quick-intake'];
+  private routeSubscription?: Subscription;
   private clockInterval?: ReturnType<typeof setInterval>;
 
   readonly allTodayAppointments = computed(() => this.sortedAppointments().filter((appointment) => this.isToday(appointment.startAt)));
@@ -2673,10 +2880,15 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   constructor(
     private readonly api: ApiService,
     private readonly fb: FormBuilder,
+    private readonly route: ActivatedRoute,
+    private readonly router: Router,
   ) { }
 
   ngOnInit() {
     this.clockInterval = setInterval(() => this.now.set(Date.now()), 30_000);
+    this.routeSubscription = this.route.queryParamMap.subscribe((params) => {
+      this.applyAdminTab(this.normalizeAdminTab(params.get('tab')));
+    });
     this.refresh();
   }
 
@@ -2684,6 +2896,32 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     if (this.clockInterval) {
       clearInterval(this.clockInterval);
     }
+    this.routeSubscription?.unsubscribe();
+  }
+
+  selectAdminTab(tab: AdminTab) {
+    const nextTab = this.normalizeAdminTab(tab);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { tab: nextTab },
+      queryParamsHandling: 'merge',
+    });
+  }
+
+  private normalizeAdminTab(tab: string | null): AdminTab {
+    return this.adminTabs.includes(tab as AdminTab) ? (tab as AdminTab) : 'today';
+  }
+
+  private applyAdminTab(tab: AdminTab) {
+    if (tab === 'materials') {
+      this.openMaterials();
+      return;
+    }
+    if (tab === 'quick-intake') {
+      this.openQuickIntake();
+      return;
+    }
+    this.activeTab.set(tab);
   }
 
   refresh() {
@@ -3628,7 +3866,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       next: (result) => {
         this.quickIntakeResult.set({ patient, completionUrl: result.completionUrl, expiresAt: result.expiresAt });
         this.drawerMessage.set('Link regenerado. Lo dejamos listo en Alta paciente para copiar o enviar.');
-        this.activeTab.set('quick-intake');
+        this.selectAdminTab('quick-intake');
       },
       error: (error) => {
         this.drawerError.set(true);
