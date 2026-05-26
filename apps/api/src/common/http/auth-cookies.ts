@@ -29,9 +29,11 @@ function durationToMs(value: string | undefined, fallbackMs: number) {
 
 function baseCookieOptions(config: ConfigService) {
   const domain = config.get<string>('COOKIE_DOMAIN');
+  const cookieSecure = config.get<string>('COOKIE_SECURE');
+  const secure = cookieSecure === undefined ? config.get<string>('NODE_ENV') === 'production' : cookieSecure === 'true';
   return {
     httpOnly: true,
-    secure: config.get<string>('NODE_ENV') === 'production',
+    secure,
     sameSite: 'lax' as const,
     path: '/',
     ...(domain ? { domain } : {}),
