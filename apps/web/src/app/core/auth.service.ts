@@ -12,6 +12,7 @@ interface AuthResponse {
 export class AuthService {
   readonly currentUser = signal<AuthUser | null>(null);
   private sessionRequest?: Observable<AuthUser | null>;
+  private sessionRestoreFailed = false;
 
   constructor(
     private readonly api: ApiService,
@@ -27,6 +28,7 @@ export class AuthService {
   }
 
   acceptSession(response: AuthResponse) {
+    this.sessionRestoreFailed = false;
     this.currentUser.set(response.user);
     void this.router.navigateByUrl(response.user.role === 'admin' ? '/admin' : '/paciente');
   }
@@ -38,12 +40,16 @@ export class AuthService {
     if (this.sessionRequest) {
       return this.sessionRequest;
     }
+    if (this.sessionRestoreFailed) {
+      return of(null);
+    }
 
     this.sessionRequest = this.api.get<AuthUser>('/auth/me').pipe(
       catchError(() => this.api.post<AuthResponse>('/auth/refresh', {}).pipe(map((response) => response.user))),
       tap((user) => this.currentUser.set(user)),
       catchError(() => {
         this.currentUser.set(null);
+        this.sessionRestoreFailed = true;
         return of(null);
       }),
       finalize(() => {
@@ -58,7 +64,15 @@ export class AuthService {
   refreshSession() {
     return this.api.post<AuthResponse>('/auth/refresh', {}).pipe(
       map((response) => response.user),
-      tap((user) => this.currentUser.set(user)),
+      tap((user) => {
+        this.sessionRestoreFailed = false;
+        this.currentUser.set(user);
+      }),
+      catchError((error) => {
+        this.currentUser.set(null);
+        this.sessionRestoreFailed = true;
+        throw error;
+      }),
     );
   }
 
@@ -70,6 +84,7 @@ export class AuthService {
   }
 
   private clearLocalSession() {
+    this.sessionRestoreFailed = true;
     this.currentUser.set(null);
     void this.router.navigateByUrl('/');
   }
