@@ -1,5 +1,5 @@
 import { DatePipe, LowerCasePipe } from '@angular/common';
-import { Component, OnInit, computed, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { CalendarOptions, EventClickArg, EventInput } from '@fullcalendar/core';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -90,6 +90,7 @@ interface InactivePatient {
   patientStatus?: string;
   lastBookedAt?: string;
   lastSessionAt?: string;
+  inactiveDays?: number | null;
 }
 
 interface QuickIntakeResult {
@@ -202,7 +203,7 @@ interface QuickIntakeResult {
                     </span>
                   </button>
                 } @empty {
-                  <p class="empty-state">No hay sesiones programadas para hoy.</p>
+                  <p class="empty-state">No hay sesiones pendientes para hoy.</p>
                 }
               </div>
             </article>
@@ -237,7 +238,7 @@ interface QuickIntakeResult {
                   <div class="inactive-row">
                     <div>
                       <strong>{{ inactiveName(patient) }}</strong>
-                      <small>{{ inactiveDays(patient) }} días sin agendar</small>
+                      <small>{{ inactiveLastSessionLabel(patient) }} · {{ inactiveDays(patient) }} días sin agendar</small>
                     </div>
                     <button class="mini-button" type="button" (click)="sendReminder(patient)">Enviar recordatorio</button>
                   </div>
@@ -314,7 +315,7 @@ interface QuickIntakeResult {
                 <div class="inactive-row">
                   <div>
                     <strong>{{ inactiveName(patient) }}</strong>
-                    <small>{{ inactiveDays(patient) }} días sin agendar</small>
+                    <small>{{ inactiveLastSessionLabel(patient) }} · {{ inactiveDays(patient) }} días sin agendar</small>
                   </div>
                   <button class="mini-button" type="button" (click)="sendReminder(patient)">Recordatorio</button>
                 </div>
@@ -2030,11 +2031,12 @@ interface QuickIntakeResult {
     `,
   ],
 })
-export class AdminDashboardComponent implements OnInit {
+export class AdminDashboardComponent implements OnInit, OnDestroy {
   readonly activeTab = signal<AdminTab>('today');
   readonly summary = signal<CrmSummary | null>(null);
   readonly patients = signal<PatientRow[]>([]);
   readonly appointments = signal<AppointmentRow[]>([]);
+  readonly now = signal(Date.now());
   readonly inactivePatients = signal<InactivePatient[]>([]);
   readonly suggestions = signal<Array<{ _id: string; message: string; status?: string; patientId?: { name?: string; email?: string } }>>([]);
   readonly availabilityRules = signal<AvailabilityRule[]>([]);
@@ -2104,14 +2106,18 @@ export class AdminDashboardComponent implements OnInit {
     [...this.appointments()].sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime()),
   );
 
+  private readonly inactiveAppointmentStatuses: AppointmentStatus[] = ['cancelled', 'completed', 'no_show'];
+  private clockInterval?: ReturnType<typeof setInterval>;
+
   readonly allTodayAppointments = computed(() => this.sortedAppointments().filter((appointment) => this.isToday(appointment.startAt)));
-  readonly todayAppointments = computed(() => this.allTodayAppointments().filter((appointment) => appointment.status !== 'cancelled'));
+  readonly todayAppointments = computed(() =>
+    this.allTodayAppointments().filter((appointment) => this.isActionableAppointment(appointment, this.now())),
+  );
 
   readonly upcomingAppointments = computed(() => {
-    const now = Date.now();
+    const now = this.now();
     return this.sortedAppointments().filter((appointment) => {
-      const end = new Date(appointment.endAt).getTime();
-      return end >= now && !['cancelled', 'completed', 'no_show'].includes(appointment.status);
+      return this.isActionableAppointment(appointment, now);
     });
   });
 
@@ -2178,7 +2184,14 @@ export class AdminDashboardComponent implements OnInit {
   ) { }
 
   ngOnInit() {
+    this.clockInterval = setInterval(() => this.now.set(Date.now()), 30_000);
     this.refresh();
+  }
+
+  ngOnDestroy() {
+    if (this.clockInterval) {
+      clearInterval(this.clockInterval);
+    }
   }
 
   refresh() {
@@ -2799,10 +2812,10 @@ export class AdminDashboardComponent implements OnInit {
   }
 
   statusTone(appointment: AppointmentRow) {
-    const now = Date.now();
+    const now = this.now();
     const start = new Date(appointment.startAt).getTime();
     const end = new Date(appointment.endAt).getTime();
-    if (!['cancelled', 'completed', 'no_show'].includes(appointment.status) && now >= start && now <= end) {
+    if (!this.inactiveAppointmentStatuses.includes(appointment.status) && now >= start && now <= end) {
       return 'status-current';
     }
     if (this.nextAppointment()?._id === appointment._id) {
@@ -2830,7 +2843,7 @@ export class AdminDashboardComponent implements OnInit {
   }
 
   timeRemaining(startValue: string, endValue?: string) {
-    const now = Date.now();
+    const now = this.now();
     const start = new Date(startValue).getTime();
     const end = endValue ? new Date(endValue).getTime() : start;
     if (now >= start && now <= end) return 'Ahora';
@@ -2838,6 +2851,16 @@ export class AdminDashboardComponent implements OnInit {
     if (diff < 0) return 'Terminada';
     const minutes = Math.round(diff / 60000);
     if (minutes < 60) return `En ${minutes} min`;
+    const days = Math.floor(minutes / 1440);
+    if (days > 0) {
+      const remainingMinutes = minutes % 1440;
+      const hours = Math.floor(remainingMinutes / 60);
+      const rest = remainingMinutes % 60;
+      const dayLabel = days === 1 ? '1 dia' : `${days} dias`;
+      const hourLabel = hours > 0 ? `${hours} h` : '';
+      const minuteLabel = rest > 0 ? `${rest} min` : '';
+      return `En ${[dayLabel, hourLabel, minuteLabel].filter(Boolean).join(' ')}`;
+    }
     const hours = Math.floor(minutes / 60);
     const rest = minutes % 60;
     return rest ? `En ${hours} h ${rest} min` : `En ${hours} h`;
@@ -2868,6 +2891,11 @@ export class AdminDashboardComponent implements OnInit {
     return date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
   }
 
+  isActionableAppointment(appointment: AppointmentRow, now: number) {
+    const end = new Date(appointment.endAt).getTime();
+    return end >= now && !this.inactiveAppointmentStatuses.includes(appointment.status);
+  }
+
   formatDateKey(date: Date) {
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -2880,9 +2908,20 @@ export class AdminDashboardComponent implements OnInit {
   }
 
   inactiveDays(patient: InactivePatient) {
-    const last = patient.lastBookedAt ?? patient.lastSessionAt;
-    if (!last) return 30;
-    return Math.max(0, Math.floor((Date.now() - new Date(last).getTime()) / 86400000));
+    if (typeof patient.inactiveDays === 'number') {
+      return patient.inactiveDays;
+    }
+    const last = patient.lastSessionAt ?? patient.lastBookedAt;
+    if (!last) return 0;
+    return Math.max(0, Math.floor((this.now() - new Date(last).getTime()) / 86400000));
+  }
+
+  inactiveLastSessionLabel(patient: InactivePatient) {
+    if (!patient.lastSessionAt) {
+      return 'Sin sesiones registradas';
+    }
+    const date = new Date(patient.lastSessionAt);
+    return `Última sesión: ${date.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}`;
   }
 
   patientStatusLabel(status = 'new') {

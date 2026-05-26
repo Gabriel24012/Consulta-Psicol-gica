@@ -31,9 +31,10 @@ export class CrmService {
   async inactivePatients(days = 30) {
     const threshold = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const profiles = await this.profileModel
-      .find({ $or: [{ lastBookedAt: { $lt: threshold } }, { lastBookedAt: { $exists: false } }] })
+      .find()
       .populate('userId', 'name email phone')
       .sort({ lastBookedAt: 1 })
+      .lean()
       .exec();
     const seenUserIds = new Set<string>();
     const uniqueProfiles = profiles.filter((profile) => {
@@ -50,22 +51,54 @@ export class CrmService {
       const user = profile.userId as unknown as { _id?: unknown };
       return user?._id ?? profile.userId;
     });
-    const activeAppointments = await this.appointmentModel
-      .find({
-        patientId: { $in: userIds },
-        endAt: { $gte: new Date() },
-        status: { $nin: ['cancelled', 'completed', 'no_show'] },
-      })
-      .select('patientId')
-      .lean()
-      .exec();
+    const now = new Date();
+    const [activeAppointments, pastAppointments] = await Promise.all([
+      this.appointmentModel
+        .find({
+          patientId: { $in: userIds },
+          endAt: { $gte: now },
+          status: { $nin: ['cancelled', 'completed', 'no_show'] },
+        })
+        .select('patientId')
+        .lean()
+        .exec(),
+      this.appointmentModel
+        .find({
+          patientId: { $in: userIds },
+          endAt: { $lt: now },
+          status: { $nin: ['cancelled', 'no_show'] },
+        })
+        .select('patientId endAt')
+        .sort({ endAt: -1 })
+        .lean()
+        .exec(),
+    ]);
     const scheduledUserIds = new Set(activeAppointments.map((appointment) => appointment.patientId.toString()));
+    const lastSessionByUserId = new Map<string, Date>();
+    for (const appointment of pastAppointments) {
+      const userId = appointment.patientId.toString();
+      if (!lastSessionByUserId.has(userId)) {
+        lastSessionByUserId.set(userId, appointment.endAt);
+      }
+    }
 
-    return uniqueProfiles.filter((profile) => {
-      const user = profile.userId as unknown as { _id?: unknown };
-      const userId = user?._id?.toString() ?? profile.userId?.toString();
-      return !scheduledUserIds.has(userId);
-    });
+    return uniqueProfiles
+      .map((profile) => {
+        const user = profile.userId as unknown as { _id?: unknown };
+        const userId = user?._id?.toString() ?? profile.userId?.toString();
+        const lastSessionAt = lastSessionByUserId.get(userId) ?? profile.lastSessionAt ?? null;
+        const lastActivityAt = lastSessionAt ?? profile.lastBookedAt ?? (profile as { createdAt?: Date }).createdAt ?? null;
+        const inactiveDays = lastActivityAt ? Math.max(0, Math.floor((now.getTime() - new Date(lastActivityAt).getTime()) / 86400000)) : null;
+
+        return {
+          ...profile,
+          lastSessionAt,
+          inactiveDays,
+          hasUpcomingAppointment: scheduledUserIds.has(userId),
+        };
+      })
+      .filter((profile) => !profile.hasUpcomingAppointment && (!profile.lastSessionAt || new Date(profile.lastSessionAt) < threshold))
+      .sort((a, b) => (b.inactiveDays ?? 0) - (a.inactiveDays ?? 0));
   }
 
   async followUp(patientId: string) {
