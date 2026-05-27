@@ -803,25 +803,30 @@ interface MaterialSection {
               <strong>{{ patient.profile.totalSessions }}</strong>
             </div>
           </section>
-          <form class="patient-edit-form" [formGroup]="patientContactForm" (ngSubmit)="savePatientBasics()">
-            <label class="field">
-              <span>Nombre</span>
-              <input class="input" formControlName="name" autocomplete="off">
-            </label>
-            <label class="field">
-              <span>Email</span>
-              <input class="input" formControlName="email" autocomplete="off">
-            </label>
-            <label class="field">
-              <span>Teléfono</span>
-              <input class="input" formControlName="phone" autocomplete="off">
-            </label>
-            <label class="field">
-              <span>Sesiones históricas</span>
-              <input class="input" type="number" min="0" formControlName="totalSessions">
-            </label>
-            <button class="btn btn-soft" type="submit" [disabled]="patientContactForm.invalid">Guardar datos</button>
-          </form>
+          <section class="drawer-actions">
+            <button type="button" (click)="togglePatientProfileEdit()">{{ patientProfileEditing() ? 'Cancelar edición' : 'Editar perfil' }}</button>
+          </section>
+          @if (patientProfileEditing()) {
+            <form class="patient-edit-form" [formGroup]="patientContactForm" (ngSubmit)="savePatientBasics()">
+              <label class="field">
+                <span>Nombre</span>
+                <input class="input" formControlName="name" autocomplete="off">
+              </label>
+              <label class="field">
+                <span>Email</span>
+                <input class="input" formControlName="email" autocomplete="off">
+              </label>
+              <label class="field">
+                <span>Teléfono</span>
+                <input class="input" formControlName="phone" autocomplete="off">
+              </label>
+              <label class="field">
+                <span>Sesiones históricas</span>
+                <input class="input" type="number" min="0" formControlName="totalSessions">
+              </label>
+              <button class="btn btn-soft" type="submit" [disabled]="patientContactForm.invalid">Guardar datos</button>
+            </form>
+          }
           <section class="drawer-actions">
             <button type="button" (click)="openPatientSchedule()">Agendar cita</button>
           </section>
@@ -895,7 +900,7 @@ interface MaterialSection {
                     }
                   }
                   @if (!patientScheduleSlots().length) {
-                    <p class="empty-state">No hay horarios disponibles para este dÃ­a.</p>
+                  <p class="empty-state">No hay horarios disponibles para este día.</p>
                   }
                 }
               </div>
@@ -992,6 +997,48 @@ interface MaterialSection {
           <span>Mensajes</span>
           @if (totalUnread() > 0) {
             <b>{{ totalUnread() }}</b>
+          }
+        </button>
+      }
+    </aside>
+
+    <aside class="suggestions-dock" [class.open]="suggestionsOpen()">
+      @if (suggestionsOpen()) {
+        <section class="suggestions-window" aria-label="Sugerencias recibidas">
+          <header class="chat-header">
+            <div>
+              <span class="avatar">Sg</span>
+              <div>
+                <strong>Sugerencias recibidas</strong>
+                <small>{{ suggestions().length }} en bandeja</small>
+              </div>
+            </div>
+            <button class="dock-icon" type="button" aria-label="Cerrar sugerencias" (click)="suggestionsOpen.set(false)">x</button>
+          </header>
+          <div class="suggestions-tray">
+            @for (suggestion of suggestions(); track suggestion._id) {
+              <article class="suggestion-card" [class.new]="suggestion.status === 'new'">
+                <div>
+                  <span class="status-pill">{{ suggestionStatusLabel(suggestion.status) }}</span>
+                  @if (suggestion.patientId?.name) {
+                    <small>{{ suggestion.patientId?.name }}</small>
+                  }
+                </div>
+                <p>{{ suggestion.message }}</p>
+                @if (suggestion.status !== 'reviewed' && suggestion.status !== 'answered') {
+                  <button class="btn btn-soft" type="button" (click)="markSuggestionReviewed(suggestion._id)">Marcar como revisada</button>
+                }
+              </article>
+            } @empty {
+              <p class="chat-empty">No hay sugerencias pendientes.</p>
+            }
+          </div>
+        </section>
+      } @else {
+        <button class="suggestions-bubble" type="button" aria-label="Abrir sugerencias recibidas" (click)="suggestionsOpen.set(true)">
+          <span>Sugerencias</span>
+          @if (newSuggestionsCount() > 0) {
+            <b>{{ newSuggestionsCount() }}</b>
           }
         </button>
       }
@@ -1131,7 +1178,7 @@ interface MaterialSection {
       .metric-strip {
         display: grid;
         grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 10px;
+        gap: 8px;
       }
 
       .metric-strip article,
@@ -1144,8 +1191,8 @@ interface MaterialSection {
       }
 
       .metric-strip article {
-        min-height: 96px;
-        padding: 15px;
+        min-height: 74px;
+        padding: 12px;
       }
 
       .metric-strip span,
@@ -1158,9 +1205,10 @@ interface MaterialSection {
 
       .metric-strip strong {
         display: block;
-        margin-top: 10px;
+        margin-top: 6px;
         color: #73314c;
-        font-size: 26px;
+        font-size: 24px;
+        line-height: 1.15;
       }
 
       .next-session-card {
@@ -2216,6 +2264,13 @@ interface MaterialSection {
         max-height: calc(100dvh - 48px);
       }
 
+      .suggestions-dock {
+        position: fixed;
+        right: 24px;
+        bottom: 92px;
+        z-index: 39;
+      }
+
       .chat-bubble {
         position: relative;
         min-width: 142px;
@@ -2228,11 +2283,25 @@ interface MaterialSection {
         box-shadow: 0 18px 38px rgba(141, 49, 89, 0.28);
       }
 
+      .suggestions-bubble {
+        position: relative;
+        min-width: 142px;
+        border: 0;
+        border-radius: 999px;
+        padding: 15px 20px;
+        background: #6f4a7d;
+        color: var(--white);
+        cursor: pointer;
+        font-weight: 950;
+        box-shadow: 0 18px 38px rgba(141, 49, 89, 0.28);
+      }
+
       .chat-bubble {
         background: #8d3159;
       }
 
-      .chat-bubble b {
+      .chat-bubble b,
+      .suggestions-bubble b {
         position: absolute;
         top: -7px;
         right: -4px;
@@ -2249,6 +2318,16 @@ interface MaterialSection {
 
       .chat-window {
         overflow: hidden;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--white);
+        box-shadow: 0 24px 70px rgba(80, 62, 72, 0.22);
+      }
+
+      .suggestions-window {
+        overflow: hidden;
+        width: min(420px, calc(100vw - 32px));
+        max-height: min(560px, calc(100vh - 120px));
         border: 1px solid var(--border);
         border-radius: 8px;
         background: var(--white);
@@ -2394,6 +2473,15 @@ interface MaterialSection {
         grid-template-columns: 1fr auto;
         gap: 10px;
         margin-top: 10px;
+      }
+
+      .suggestions-tray {
+        display: grid;
+        gap: 12px;
+        max-height: calc(min(560px, calc(100vh - 120px)) - 67px);
+        overflow: auto;
+        padding: 14px;
+        background: #fffafb;
       }
 
       .suggestion-card {
@@ -2730,7 +2818,8 @@ interface MaterialSection {
           text-overflow: ellipsis;
         }
 
-        .chat-dock {
+        .chat-dock,
+        .suggestions-dock {
           right: 12px;
         }
 
@@ -2738,7 +2827,12 @@ interface MaterialSection {
           bottom: 12px;
         }
 
-        .chat-dock.open {
+        .suggestions-dock {
+          bottom: 76px;
+        }
+
+        .chat-dock.open,
+        .suggestions-dock.open {
           inset: 10px;
           right: 10px;
           bottom: 10px;
@@ -2749,6 +2843,14 @@ interface MaterialSection {
         .chat-window {
           width: 100%;
           height: 100%;
+        }
+
+        .suggestions-window {
+          width: 100%;
+          height: 100%;
+          max-height: none;
+          display: grid;
+          grid-template-rows: auto minmax(0, 1fr);
         }
 
         .chat-body {
@@ -2774,6 +2876,15 @@ interface MaterialSection {
           width: 100%;
         }
 
+        .suggestions-tray {
+          max-height: none;
+          min-height: 0;
+        }
+
+        .suggestion-card .btn {
+          width: 100%;
+        }
+
       }
     `,
   ],
@@ -2785,12 +2896,15 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   readonly appointments = signal<AppointmentRow[]>([]);
   readonly now = signal(Date.now());
   readonly inactivePatients = signal<InactivePatient[]>([]);
+  readonly suggestions = signal<Array<{ _id: string; message: string; status?: string; patientId?: { name?: string; email?: string } }>>([]);
   readonly availabilityRules = signal<AvailabilityRule[]>([]);
   readonly conversations = signal<ChatConversation[]>([]);
   readonly selectedChatPatientId = signal('');
   readonly chatMessages = signal<ChatMessage[]>([]);
   readonly chatOpen = signal(false);
+  readonly suggestionsOpen = signal(false);
   readonly addSessionOpen = signal(false);
+  readonly patientProfileEditing = signal(false);
   readonly currentAdminId = signal('');
   readonly chatStatus = signal('');
   readonly chatError = signal(false);
@@ -3001,6 +3115,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.loadInactivePatients();
     this.loadAvailabilityRules();
     this.api.get<AppointmentRow[]>('/appointments').subscribe((appointments) => this.appointments.set(appointments));
+    this.loadSuggestions();
     this.api.get<{ sub: string }>('/auth/me').subscribe((user) => this.currentAdminId.set(user.sub));
     this.loadConversations();
     this.loadMaterialSections();
@@ -3245,6 +3360,12 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     });
   }
 
+  loadSuggestions() {
+    this.api
+      .get<Array<{ _id: string; message: string; status?: string; patientId?: { name?: string; email?: string } }>>('/suggestions')
+      .subscribe((suggestions) => this.suggestions.set(suggestions));
+  }
+
   openQuickIntake() {
     this.activeTab.set('quick-intake');
     this.quickIntakeMessage.set('');
@@ -3460,6 +3581,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.drawerOpen.set(false);
     this.selectedAppointment.set(null);
     this.selectedPatient.set(null);
+    this.patientProfileEditing.set(false);
     this.reschedulingAppointmentId.set(null);
     this.rescheduleSlots.set([]);
     this.selectedRescheduleSlot.set(null);
@@ -3471,6 +3593,16 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
   drawerPatientName() {
     return this.selectedPatient()?.name ?? (this.selectedAppointment() ? this.appointmentPatientName(this.selectedAppointment()!) : 'Paciente');
+  }
+
+  togglePatientProfileEdit() {
+    const patient = this.selectedPatient();
+    if (!patient) return;
+    const next = !this.patientProfileEditing();
+    if (next) {
+      this.patchPatientForms(patient);
+    }
+    this.patientProfileEditing.set(next);
   }
 
   private patchPatientForms(patient: PatientRow) {
@@ -3517,6 +3649,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
               };
               this.selectedPatient.set(mergedPatient);
               this.patchPatientForms(mergedPatient);
+              this.patientProfileEditing.set(false);
               this.drawerMessage.set('Datos del paciente guardados.');
               this.loadPatients();
               this.refresh();
@@ -3669,9 +3802,9 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
   groupedPatientScheduleSlots() {
     return [
-      { label: 'MaÃ±ana', slots: this.patientScheduleSlots().filter((slot) => new Date(slot.startAt).getHours() < 12) },
+      { label: 'Mañana', slots: this.patientScheduleSlots().filter((slot) => new Date(slot.startAt).getHours() < 12) },
       {
-        label: 'MediodÃ­a',
+        label: 'Mediodía',
         slots: this.patientScheduleSlots().filter((slot) => {
           const hour = new Date(slot.startAt).getHours();
           return hour >= 12 && hour < 17;
@@ -4053,6 +4186,20 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     return Array.isArray(message) ? message.join(' ') : message ?? fallback;
   }
 
+  newSuggestionsCount() {
+    return this.suggestions().filter((suggestion) => suggestion.status === 'new').length;
+  }
+
+  suggestionStatusLabel(status = 'new') {
+    const labels: Record<string, string> = {
+      new: 'Nueva',
+      reviewed: 'Revisada',
+      answered: 'Respondida',
+      closed: 'Archivada',
+    };
+    return labels[status] ?? status;
+  }
+
   openChatDock() {
     this.chatOpen.set(true);
     this.loadConversations();
@@ -4161,6 +4308,10 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         this.chatStatus.set('No se pudo enviar el mensaje.');
       },
     });
+  }
+
+  markSuggestionReviewed(id: string) {
+    this.api.patch(`/suggestions/${id}/status`, { status: 'reviewed' }).subscribe(() => this.loadSuggestions());
   }
 
   normalizeMessages(messages: ChatMessage[]) {

@@ -14,10 +14,12 @@ export class QuickAppointmentDto {
 }
 
 export class CreatePatientInvitationDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   @IsString()
   name!: string;
 
   @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' && value.trim() === '' ? undefined : value))
   @IsString()
   phone?: string;
 
