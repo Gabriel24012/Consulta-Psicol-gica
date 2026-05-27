@@ -9,13 +9,13 @@ export class User {
   @Prop({ required: true, trim: true })
   name!: string;
 
-  @Prop({ unique: true, sparse: true, lowercase: true, trim: true })
+  @Prop({ lowercase: true, trim: true })
   email?: string;
 
   @Prop({ trim: true })
   phone?: string;
 
-  @Prop({ unique: true, sparse: true, trim: true })
+  @Prop({ trim: true })
   phoneNormalized?: string;
 
   @Prop({ select: false })
@@ -35,3 +35,19 @@ export class User {
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
+
+UserSchema.index(
+  { email: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { email: { $type: 'string' } },
+  },
+);
+
+UserSchema.index(
+  { phoneNormalized: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { phoneNormalized: { $type: 'string' } },
+  },
+);

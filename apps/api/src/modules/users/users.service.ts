@@ -32,14 +32,25 @@ export class UsersService {
       }
     }
 
-    return this.userModel.create({
+    const userToCreate: Record<string, unknown> = {
       ...input,
-      email: normalizedEmail,
       phone: input.phone?.trim(),
-      phoneNormalized: normalizedPhone,
       role: input.role ?? 'patient',
       status: input.status ?? 'active',
-    });
+    };
+    if (normalizedEmail) {
+      userToCreate.email = normalizedEmail;
+    } else {
+      delete userToCreate.email;
+    }
+    if (normalizedPhone) {
+      userToCreate.phoneNormalized = normalizedPhone;
+    } else {
+      delete userToCreate.phone;
+      delete userToCreate.phoneNormalized;
+    }
+
+    return this.userModel.create(userToCreate);
   }
 
   findByEmailWithPassword(email: string) {
