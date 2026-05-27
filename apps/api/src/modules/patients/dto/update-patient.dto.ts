@@ -1,4 +1,5 @@
-import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsEmail, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { PatientStatus } from '@itzel/shared';
 
 export class UpdatePatientStatusDto {
@@ -7,9 +8,25 @@ export class UpdatePatientStatusDto {
 }
 
 export class UpdatePatientPackageDto {
+  @Type(() => Number)
   @IsInt()
   @Min(0)
-  remainingSessions!: number;
+  totalSessions!: number;
+}
+
+export class UpdatePatientContactDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (typeof value === 'string' && value.trim() === '' ? undefined : value))
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
 }
 
 export class CreatePatientNoteDto {

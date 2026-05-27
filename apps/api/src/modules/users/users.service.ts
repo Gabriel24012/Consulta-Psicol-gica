@@ -59,8 +59,12 @@ export class UsersService {
 
   async completeIncompletePatient(
     userId: string | Types.ObjectId,
-    input: { email: string; phone: string; passwordHash: string; privacyConsentAcceptedAt: Date },
+    input: { name: string; email: string; phone: string; passwordHash: string; privacyConsentAcceptedAt: Date },
   ) {
+    const name = input.name.trim();
+    if (!name) {
+      throw new BadRequestException('El nombre del paciente es obligatorio.');
+    }
     const normalizedEmail = this.normalizeEmail(input.email);
     const normalizedPhone = this.normalizePhone(input.phone);
     const emailExists = await this.userModel.exists({ email: normalizedEmail, _id: { $ne: userId } });
@@ -78,12 +82,56 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException('Paciente no encontrado.');
     }
+    user.name = name;
     user.email = normalizedEmail;
     user.phone = input.phone.trim();
     user.phoneNormalized = normalizedPhone;
     user.passwordHash = input.passwordHash;
     user.status = 'active';
     user.privacyConsentAcceptedAt = input.privacyConsentAcceptedAt;
+    return user.save();
+  }
+
+  async updatePatientContact(
+    userId: string | Types.ObjectId,
+    input: { name?: string; email?: string; phone?: string },
+  ) {
+    const user = await this.userModel.findOne({ _id: userId, role: 'patient' }).exec();
+    if (!user) {
+      throw new NotFoundException('Paciente no encontrado.');
+    }
+
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (!name) {
+        throw new BadRequestException('El nombre del paciente es obligatorio.');
+      }
+      user.name = name;
+    }
+
+    if (input.email !== undefined) {
+      const normalizedEmail = this.normalizeEmail(input.email);
+      if (normalizedEmail) {
+        const emailExists = await this.userModel.exists({ email: normalizedEmail, _id: { $ne: user._id } });
+        if (emailExists) {
+          throw new ConflictException('El correo ya esta registrado.');
+        }
+      }
+      user.email = normalizedEmail;
+    }
+
+    if (input.phone !== undefined) {
+      const normalizedPhone = this.normalizePhone(input.phone);
+      if (normalizedPhone) {
+        const phoneExists = await this.phoneExists(normalizedPhone, user._id);
+        if (phoneExists) {
+          throw new ConflictException('El telefono ya esta registrado.');
+        }
+      }
+      user.phone = input.phone.trim();
+      user.phoneNormalized = normalizedPhone;
+    }
+
     return user.save();
   }
 

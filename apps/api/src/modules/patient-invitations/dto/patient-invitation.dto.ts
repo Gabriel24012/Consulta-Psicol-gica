@@ -18,12 +18,20 @@ export class CreatePatientInvitationDto {
   name!: string;
 
   @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
   @ValidateNested()
   @Type(() => QuickAppointmentDto)
   appointment?: QuickAppointmentDto;
 }
 
 export class CompletePatientInvitationDto {
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
+  name!: string;
+
   @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
   @IsEmail()
   email!: string;

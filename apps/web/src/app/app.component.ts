@@ -44,7 +44,7 @@ import { AuthService } from './core/auth.service';
             <a routerLink="/admin" [queryParams]="{ tab: 'patients' }" [class.active-link]="isAdminTab('patients')" (click)="closeMenu()">Pacientes</a>
             <a routerLink="/admin" [queryParams]="{ tab: 'materials' }" [class.active-link]="isAdminTab('materials')" (click)="closeMenu()">Materiales</a>
             <a routerLink="/admin" [queryParams]="{ tab: 'schedule' }" [class.active-link]="isAdminTab('schedule')" (click)="closeMenu()">Horarios</a>
-            <a routerLink="/admin" [queryParams]="{ tab: 'quick-intake' }" [class.active-link]="isAdminTab('quick-intake')" (click)="closeMenu()">Alta paciente</a>
+            <a routerLink="/admin" [queryParams]="{ tab: 'quick-intake' }" [class.active-link]="isAdminTab('quick-intake')" (click)="closeMenu()">Registrar paciente</a>
           </div>
         }
         @if (auth.currentUser()) {

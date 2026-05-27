@@ -1,11 +1,10 @@
-import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { AppointmentsService } from './appointments.service';
 
 function createService(overrides: Partial<Record<string, any>> = {}) {
   const config = overrides.config ?? { get: jest.fn() };
   const appointmentModel = {
     create: jest.fn(),
-    deleteMany: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue({ deletedCount: 1 }) }),
     findById: jest.fn(),
     findOne: jest.fn().mockReturnValue({ exec: jest.fn().mockResolvedValue(null) }),
   };
@@ -123,18 +122,5 @@ describe('AppointmentsService booking safeguards', () => {
 
     expect(oldAppointment.status).toBe('confirmed');
     expect(oldAppointment.save).not.toHaveBeenCalled();
-  });
-
-  it('allows delete all in development for test cleanup', async () => {
-    const { service } = createService();
-
-    await expect(service.deleteAll()).resolves.toEqual({ ok: true, deletedCount: 1 });
-  });
-
-  it('protects delete all in production unless the explicit flag is enabled', async () => {
-    const config = { get: jest.fn((key: string) => (key === 'NODE_ENV' ? 'production' : undefined)) };
-    const { service } = createService({ config });
-
-    await expect(service.deleteAll()).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

@@ -102,16 +102,6 @@ export class AppointmentsService {
     return this.appointmentModel.find({ patientId: user.sub }).sort({ startAt: 1 }).exec();
   }
 
-  async deleteAll() {
-    const allowDeleteAll = this.config.get<string>('ALLOW_APPOINTMENT_DELETE_ALL') === 'true';
-    const isProduction = this.config.get<string>('NODE_ENV') === 'production';
-    if (isProduction && !allowDeleteAll) {
-      throw new ForbiddenException('El borrado masivo de citas solo esta disponible cuando ALLOW_APPOINTMENT_DELETE_ALL=true.');
-    }
-    const result = await this.appointmentModel.deleteMany({}).exec();
-    return { ok: true, deletedCount: result.deletedCount ?? 0 };
-  }
-
   async updateStatus(id: string, status: AppointmentStatus) {
     const update: Record<string, unknown> = { status };
     if (status === 'cancelled') {

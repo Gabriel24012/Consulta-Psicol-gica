@@ -3,7 +3,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { CreatePatientNoteDto, UpdatePatientPackageDto, UpdatePatientStatusDto } from './dto/update-patient.dto';
+import { CreatePatientNoteDto, UpdatePatientContactDto, UpdatePatientPackageDto, UpdatePatientStatusDto } from './dto/update-patient.dto';
 import { PatientsService } from './patients.service';
 import { AuthUser } from '@itzel/shared';
 
@@ -29,10 +29,16 @@ export class PatientsController {
     return this.patientsService.updateStatus(id, dto.patientStatus);
   }
 
+  @Patch(':id/contact')
+  @Roles('admin')
+  updateContact(@Param('id') id: string, @Body() dto: UpdatePatientContactDto) {
+    return this.patientsService.updateContact(id, dto);
+  }
+
   @Patch(':id/package')
   @Roles('admin')
   updatePackage(@Param('id') id: string, @Body() dto: UpdatePatientPackageDto) {
-    return this.patientsService.updatePackage(id, dto.remainingSessions);
+    return this.patientsService.updatePackage(id, dto.totalSessions);
   }
 
   @Post(':id/notes')

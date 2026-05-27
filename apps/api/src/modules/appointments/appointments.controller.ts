@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthUser } from '@itzel/shared';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -22,12 +22,6 @@ export class AppointmentsController {
   @Roles('admin')
   list(@CurrentUser() user: AuthUser) {
     return this.appointmentsService.listForUser(user);
-  }
-
-  @Delete()
-  @Roles('admin')
-  deleteAll() {
-    return this.appointmentsService.deleteAll();
   }
 
   @Get('me')

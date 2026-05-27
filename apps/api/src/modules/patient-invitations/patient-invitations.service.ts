@@ -28,7 +28,7 @@ export class PatientInvitationsService {
       throw new BadRequestException('El nombre del paciente es obligatorio.');
     }
 
-    const user = await this.usersService.create({ name, role: 'patient', status: 'incomplete' });
+    const user = await this.usersService.create({ name, phone: dto.phone, role: 'patient', status: 'incomplete' });
     await this.patientsService.createForUser(user._id);
     const invitation = await this.createInvitation(user._id);
 
@@ -78,6 +78,7 @@ export class PatientInvitationsService {
     const { invitation, patient } = await this.findUsableInvitation(token);
     const passwordHash = await argon2.hash(dto.password);
     const completed = await this.usersService.completeIncompletePatient(patient._id, {
+      name: dto.name,
       email: dto.email,
       phone: dto.phone,
       passwordHash,

@@ -140,8 +140,9 @@ interface MaterialSection {
           <p>Agenda operativa, seguimiento y contacto rápido con pacientes sin ruido administrativo.</p>
         </div>
         <div class="hero-actions">
-          <button class="btn btn-soft" type="button" (click)="suggestionsOpen.set(true)">Sugerencias {{ newSuggestionsCount() }}</button>
-          <button class="btn btn-danger-soft" type="button" (click)="deleteAllAppointments()">Borrar citas de prueba</button>
+          @if (activeTab() === 'today') {
+            <button class="btn btn-soft" type="button" (click)="openAddSessionPanel()">Agregar sesión</button>
+          }
           <button class="btn btn-primary" type="button" (click)="refresh()">Actualizar</button>
         </div>
       </section>
@@ -152,7 +153,7 @@ interface MaterialSection {
         <button type="button" [class.active]="activeTab() === 'patients'" (click)="selectAdminTab('patients')">Pacientes</button>
         <button type="button" [class.active]="activeTab() === 'materials'" (click)="selectAdminTab('materials')">Materiales</button>
         <button type="button" [class.active]="activeTab() === 'schedule'" (click)="selectAdminTab('schedule')">Horarios</button>
-        <button type="button" [class.active]="activeTab() === 'quick-intake'" (click)="selectAdminTab('quick-intake')">Alta paciente</button>
+        <button type="button" [class.active]="activeTab() === 'quick-intake'" (click)="selectAdminTab('quick-intake')">Registrar paciente</button>
       </nav>
 
       @if (activeTab() === 'today') {
@@ -173,7 +174,7 @@ interface MaterialSection {
               </article>
               <article>
                 <span>Próxima</span>
-                <strong>{{ nextAppointment() ? (nextAppointment()?.startAt | date: 'shortTime') : 'Libre' }}</strong>
+                <strong>{{ nextAppointment() ? nextMetricLabel(nextAppointment()!.startAt) : 'Libre' }}</strong>
               </article>
               <article>
                 <span>Inactivos</span>
@@ -580,7 +581,7 @@ interface MaterialSection {
             <div class="panel-title">
               <div>
                 <span class="eyebrow">Alta rápida</span>
-                <h2>Dar de alta paciente</h2>
+                <h2>Registrar paciente</h2>
                 <p>Crea el perfil con nombre, bloquea una cita si hace falta y comparte un link para completar datos.</p>
               </div>
             </div>
@@ -589,6 +590,14 @@ interface MaterialSection {
               <label class="field field-wide">
                 <span>Nombre del paciente</span>
                 <input class="input" formControlName="name" autocomplete="off" placeholder="Nombre completo">
+              </label>
+
+              <label class="field field-wide">
+                <span>Teléfono del paciente</span>
+                <input class="input" formControlName="phone" autocomplete="off" placeholder="Opcional, 10 dígitos">
+                @if (controlInvalid(quickIntakeForm, 'phone')) {
+                  <small class="field-error">Escribe un teléfono válido de 10 dígitos o déjalo vacío.</small>
+                }
               </label>
 
               <label class="check-line">
@@ -794,8 +803,43 @@ interface MaterialSection {
               <strong>{{ patient.profile.totalSessions }}</strong>
             </div>
           </section>
+          <form class="patient-edit-form" [formGroup]="patientContactForm" (ngSubmit)="savePatientBasics()">
+            <label class="field">
+              <span>Nombre</span>
+              <input class="input" formControlName="name" autocomplete="off">
+            </label>
+            <label class="field">
+              <span>Email</span>
+              <input class="input" formControlName="email" autocomplete="off">
+            </label>
+            <label class="field">
+              <span>Teléfono</span>
+              <input class="input" formControlName="phone" autocomplete="off">
+            </label>
+            <label class="field">
+              <span>Sesiones históricas</span>
+              <input class="input" type="number" min="0" formControlName="totalSessions">
+            </label>
+            <button class="btn btn-soft" type="submit" [disabled]="patientContactForm.invalid">Guardar datos</button>
+          </form>
           <section class="drawer-actions">
             <button type="button" (click)="openPatientSchedule()">Agendar cita</button>
+          </section>
+          <section class="patient-appointments">
+            <div class="panel-title compact">
+              <h2>Sesiones del paciente</h2>
+              <span class="soft-count">{{ patientAppointments(patient).length }}</span>
+            </div>
+            @for (appointment of patientAppointments(patient).slice(0, 6); track appointment._id) {
+              <button class="patient-appointment-row" type="button" (click)="openAppointmentDetails(appointment)">
+                <span>
+                  <strong>{{ appointmentDateTimeLabel(appointment.startAt, appointment.endAt) }}</strong>
+                  <small>{{ statusLabel(appointment) }}</small>
+                </span>
+              </button>
+            } @empty {
+              <p class="empty-state">Aún no hay sesiones registradas con este paciente.</p>
+            }
           </section>
           @if (patientSchedulingOpen()) {
             <section class="admin-reschedule">
@@ -953,47 +997,33 @@ interface MaterialSection {
       }
     </aside>
 
-    <aside class="suggestions-dock" [class.open]="suggestionsOpen()">
-      @if (suggestionsOpen()) {
-        <section class="suggestions-window" aria-label="Sugerencias recibidas">
-          <header class="chat-header">
-            <div>
-              <span class="avatar">Sg</span>
-              <div>
-                <strong>Sugerencias recibidas</strong>
-                <small>{{ suggestions().length }} en bandeja</small>
-              </div>
-            </div>
-            <button class="dock-icon" type="button" aria-label="Cerrar sugerencias" (click)="suggestionsOpen.set(false)">x</button>
-          </header>
-          <div class="suggestions-tray">
-            @for (suggestion of suggestions(); track suggestion._id) {
-              <article class="suggestion-card" [class.new]="suggestion.status === 'new'">
-                <div>
-                  <span class="status-pill">{{ suggestionStatusLabel(suggestion.status) }}</span>
-                  @if (suggestion.patientId?.name) {
-                    <small>{{ suggestion.patientId?.name }}</small>
-                  }
-                </div>
-                <p>{{ suggestion.message }}</p>
-                @if (suggestion.status !== 'reviewed' && suggestion.status !== 'answered') {
-                  <button class="btn btn-soft" type="button" (click)="markSuggestionReviewed(suggestion._id)">Marcar como revisada</button>
-                }
-              </article>
-            } @empty {
-              <p class="chat-empty">No hay sugerencias pendientes.</p>
-            }
+    @if (addSessionOpen()) {
+      <aside class="detail-backdrop" (click)="addSessionOpen.set(false)"></aside>
+      <aside class="add-session-modal" aria-label="Agregar sesión">
+        <header>
+          <div>
+            <span class="eyebrow">Agregar sesión</span>
+            <h2>Selecciona un paciente</h2>
           </div>
-        </section>
-      } @else {
-        <button class="suggestions-bubble" type="button" aria-label="Abrir sugerencias recibidas" (click)="suggestionsOpen.set(true)">
-          <span>Sugerencias</span>
-          @if (newSuggestionsCount() > 0) {
-            <b>{{ newSuggestionsCount() }}</b>
+          <button class="dock-icon" type="button" aria-label="Cerrar" (click)="addSessionOpen.set(false)">x</button>
+        </header>
+        <input class="input" placeholder="Buscar paciente" [formControl]="addSessionSearch">
+        <div class="add-session-list">
+          @for (patient of filteredAddSessionPatients(); track patient._id) {
+            <button type="button" (click)="openAddSessionForPatient(patient._id)">
+              <span class="patient-avatar">{{ initials(patient.name) }}</span>
+              <span>
+                <strong>{{ patient.name }}</strong>
+                <small>{{ patientContactLabel(patient) }}</small>
+              </span>
+            </button>
+          } @empty {
+            <p class="empty-state">No encontramos pacientes con esa búsqueda.</p>
           }
-        </button>
-      }
-    </aside>
+        </div>
+        <button class="btn btn-primary" type="button" (click)="openRegisterPatientForSession()">Registrar paciente nuevo</button>
+      </aside>
+    }
   `,
   styles: [
     `
@@ -1955,10 +1985,57 @@ interface MaterialSection {
         color: #4a3740;
       }
 
+      .patient-edit-form,
       .notes-form,
       .admin-reschedule {
         display: grid;
         gap: 12px;
+      }
+
+      .patient-edit-form {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .patient-edit-form .btn {
+        grid-column: 1 / -1;
+      }
+
+      .patient-appointments {
+        display: grid;
+        gap: 10px;
+      }
+
+      .patient-appointment-row,
+      .add-session-list button {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px;
+        background: #fffafb;
+        color: inherit;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .patient-appointment-row strong,
+      .add-session-list strong {
+        display: block;
+        color: #4a3740;
+      }
+
+      .patient-appointment-row small,
+      .add-session-list small {
+        color: var(--muted);
+        font-weight: 750;
+      }
+
+      .field-error {
+        color: #8b2d2d;
+        font-size: 12px;
+        font-weight: 800;
       }
 
       .pending-profile {
@@ -1974,6 +2051,43 @@ interface MaterialSection {
       .pending-profile p {
         margin: 0;
         color: #7b6645;
+      }
+
+      .add-session-modal {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        z-index: 80;
+        display: grid;
+        gap: 14px;
+        width: min(520px, calc(100vw - 28px));
+        max-height: min(720px, calc(100vh - 28px));
+        overflow: auto;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 18px;
+        background: var(--white);
+        box-shadow: 0 26px 80px rgba(65, 49, 58, 0.22);
+        transform: translate(-50%, -50%);
+      }
+
+      .add-session-modal header {
+        display: flex;
+        align-items: start;
+        justify-content: space-between;
+        gap: 14px;
+      }
+
+      .add-session-modal h2 {
+        margin: 8px 0 0;
+        color: #49363e;
+      }
+
+      .add-session-list {
+        display: grid;
+        gap: 8px;
+        max-height: 360px;
+        overflow: auto;
       }
 
       .mini-calendar {
@@ -2102,15 +2216,7 @@ interface MaterialSection {
         max-height: calc(100dvh - 48px);
       }
 
-      .suggestions-dock {
-        position: fixed;
-        right: 24px;
-        bottom: 92px;
-        z-index: 39;
-      }
-
-      .chat-bubble,
-      .suggestions-bubble {
+      .chat-bubble {
         position: relative;
         min-width: 142px;
         border: 0;
@@ -2126,12 +2232,7 @@ interface MaterialSection {
         background: #8d3159;
       }
 
-      .suggestions-bubble {
-        background: #6f4a7d;
-      }
-
-      .chat-bubble b,
-      .suggestions-bubble b {
+      .chat-bubble b {
         position: absolute;
         top: -7px;
         right: -4px;
@@ -2146,8 +2247,7 @@ interface MaterialSection {
         font-size: 12px;
       }
 
-      .chat-window,
-      .suggestions-window {
+      .chat-window {
         overflow: hidden;
         border: 1px solid var(--border);
         border-radius: 8px;
@@ -2160,11 +2260,6 @@ interface MaterialSection {
         height: min(640px, calc(100dvh - 48px));
         display: grid;
         grid-template-rows: auto minmax(0, 1fr);
-      }
-
-      .suggestions-window {
-        width: min(420px, calc(100vw - 32px));
-        max-height: min(560px, calc(100vh - 120px));
       }
 
       .chat-header {
@@ -2299,15 +2394,6 @@ interface MaterialSection {
         grid-template-columns: 1fr auto;
         gap: 10px;
         margin-top: 10px;
-      }
-
-      .suggestions-tray {
-        display: grid;
-        gap: 12px;
-        max-height: calc(min(560px, calc(100vh - 120px)) - 67px);
-        overflow: auto;
-        padding: 14px;
-        background: #fffafb;
       }
 
       .suggestion-card {
@@ -2644,8 +2730,7 @@ interface MaterialSection {
           text-overflow: ellipsis;
         }
 
-        .chat-dock,
-        .suggestions-dock {
+        .chat-dock {
           right: 12px;
         }
 
@@ -2653,12 +2738,7 @@ interface MaterialSection {
           bottom: 12px;
         }
 
-        .suggestions-dock {
-          bottom: 76px;
-        }
-
-        .chat-dock.open,
-        .suggestions-dock.open {
+        .chat-dock.open {
           inset: 10px;
           right: 10px;
           bottom: 10px;
@@ -2694,22 +2774,6 @@ interface MaterialSection {
           width: 100%;
         }
 
-        .suggestions-window {
-          width: 100%;
-          height: 100%;
-          max-height: none;
-          display: grid;
-          grid-template-rows: auto minmax(0, 1fr);
-        }
-
-        .suggestions-tray {
-          max-height: none;
-          min-height: 0;
-        }
-
-        .suggestion-card .btn {
-          width: 100%;
-        }
       }
     `,
   ],
@@ -2721,13 +2785,12 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   readonly appointments = signal<AppointmentRow[]>([]);
   readonly now = signal(Date.now());
   readonly inactivePatients = signal<InactivePatient[]>([]);
-  readonly suggestions = signal<Array<{ _id: string; message: string; status?: string; patientId?: { name?: string; email?: string } }>>([]);
   readonly availabilityRules = signal<AvailabilityRule[]>([]);
   readonly conversations = signal<ChatConversation[]>([]);
   readonly selectedChatPatientId = signal('');
   readonly chatMessages = signal<ChatMessage[]>([]);
   readonly chatOpen = signal(false);
-  readonly suggestionsOpen = signal(false);
+  readonly addSessionOpen = signal(false);
   readonly currentAdminId = signal('');
   readonly chatStatus = signal('');
   readonly chatError = signal(false);
@@ -2767,6 +2830,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   readonly patientScheduleSelectedDate = signal(this.formatDateKey(new Date()));
   readonly patientScheduleVisibleMonth = signal(new Date());
   readonly patientScheduleAvailableDayKeys = signal<Set<string>>(new Set());
+  readonly schedulePatientAfterOpen = signal(false);
   readonly materialSections = signal<MaterialSection[]>([]);
   readonly selectedMaterialSectionId = signal<string | null>(null);
   readonly editingMaterialSectionId = signal<string | null>(null);
@@ -2777,6 +2841,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   readonly weekdays = ['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom'];
 
   readonly search = this.fb.control('');
+  readonly addSessionSearch = this.fb.control('');
   readonly ruleForm = this.fb.group({
     weekday: [1],
     startTime: ['09:00'],
@@ -2787,8 +2852,15 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   });
   readonly chatForm = this.fb.group({ content: [''] });
   readonly notesForm = this.fb.group({ administrativeNotes: [''] });
+  readonly patientContactForm = this.fb.group({
+    name: ['', [Validators.required]],
+    email: ['', [Validators.email]],
+    phone: ['', [Validators.pattern(/^\s*(?:\+?52[\s.-]*)?(?:\(?\d{3}\)?[\s.-]*)\d{3}[\s.-]*\d{4}\s*$/)]],
+    totalSessions: [0, [Validators.required, Validators.min(0)]],
+  });
   readonly quickIntakeForm = this.fb.group({
     name: ['', [Validators.required]],
+    phone: ['', [Validators.pattern(/^\s*(?:\+?52[\s.-]*)?(?:\(?\d{3}\)?[\s.-]*)\d{3}[\s.-]*\d{4}\s*$/)]],
     scheduleNow: [false],
   });
   readonly materialSectionForm = this.fb.group({
@@ -2837,7 +2909,6 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   readonly selectedMaterialSection = computed(() =>
     this.materialSections().find((section) => section._id === this.selectedMaterialSectionId()) ?? null,
   );
-
   readonly confirmedTodayCount = computed(() => this.todayAppointments().filter((appointment) => appointment.status === 'confirmed').length);
   readonly cancelledTodayCount = computed(() => this.allTodayAppointments().filter((appointment) => appointment.status === 'cancelled').length);
 
@@ -2930,7 +3001,6 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.loadInactivePatients();
     this.loadAvailabilityRules();
     this.api.get<AppointmentRow[]>('/appointments').subscribe((appointments) => this.appointments.set(appointments));
-    this.loadSuggestions();
     this.api.get<{ sub: string }>('/auth/me').subscribe((user) => this.currentAdminId.set(user.sub));
     this.loadConversations();
     this.loadMaterialSections();
@@ -2947,6 +3017,39 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     if (!this.patients().length) {
       this.loadPatients();
     }
+  }
+
+  openAddSessionPanel() {
+    this.addSessionSearch.setValue('');
+    this.addSessionOpen.set(true);
+    if (!this.patients().length) {
+      this.loadPatients();
+    }
+  }
+
+  filteredAddSessionPatients() {
+    const query = (this.addSessionSearch.value ?? '').trim().toLowerCase();
+    if (!query) return this.patients().slice(0, 8);
+    return this.patients()
+      .filter((patient) => {
+        const haystack = `${patient.name} ${patient.email ?? ''} ${patient.phone ?? ''}`.toLowerCase();
+        return haystack.includes(query);
+      })
+      .slice(0, 8);
+  }
+
+  openAddSessionForPatient(patientId: string) {
+    this.addSessionOpen.set(false);
+    this.schedulePatientAfterOpen.set(true);
+    this.openPatientDetails(patientId);
+  }
+
+  openRegisterPatientForSession() {
+    this.addSessionOpen.set(false);
+    this.quickIntakeForm.patchValue({ scheduleNow: true });
+    this.selectAdminTab('quick-intake');
+    this.loadQuickMonthAvailability();
+    this.loadQuickSlots();
   }
 
   loadMaterialSections() {
@@ -3142,12 +3245,6 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     });
   }
 
-  loadSuggestions() {
-    this.api
-      .get<Array<{ _id: string; message: string; status?: string; patientId?: { name?: string; email?: string } }>>('/suggestions')
-      .subscribe((suggestions) => this.suggestions.set(suggestions));
-  }
-
   openQuickIntake() {
     this.activeTab.set('quick-intake');
     this.quickIntakeMessage.set('');
@@ -3249,10 +3346,10 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.quickIntakeMessage.set('');
     this.quickIntakeError.set(false);
 
-    if (!name) {
+    if (!name || this.quickIntakeForm.invalid) {
       this.quickIntakeForm.markAllAsTouched();
       this.quickIntakeError.set(true);
-      this.quickIntakeMessage.set('Debes llenar los campos para dar de alta al paciente.');
+      this.quickIntakeMessage.set('Revisa los datos para registrar al paciente.');
       return;
     }
 
@@ -3264,6 +3361,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
     const payload = {
       name,
+      phone: value.phone?.trim() || undefined,
       appointment: value.scheduleNow && slot ? { startAt: slot.startAt, endAt: slot.endAt } : undefined,
     };
     this.quickIntakeSaving.set(true);
@@ -3272,7 +3370,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         this.quickIntakeSaving.set(false);
         this.quickIntakeResult.set(result);
         this.quickIntakeMessage.set('Paciente creado. Link listo para enviar.');
-        this.quickIntakeForm.patchValue({ name: '', scheduleNow: false });
+        this.quickIntakeForm.patchValue({ name: '', phone: '', scheduleNow: false });
         this.quickSlots.set([]);
         this.quickSelectedSlot.set(null);
         this.refresh();
@@ -3339,14 +3437,16 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     const existing = this.patients().find((patient) => patient._id === patientId);
     if (existing) {
       this.selectedPatient.set(existing);
-      this.notesForm.patchValue({ administrativeNotes: existing.profile.administrativeNotes ?? '' });
+      this.patchPatientForms(existing);
       this.drawerOpen.set(true);
+      this.openPendingPatientSchedule();
     }
     this.api.get<PatientRow>(`/patients/${patientId}`).subscribe({
       next: (patient) => {
         this.selectedPatient.set(patient);
-        this.notesForm.patchValue({ administrativeNotes: patient.profile.administrativeNotes ?? '' });
+        this.patchPatientForms(patient);
         this.drawerOpen.set(true);
+        this.openPendingPatientSchedule();
       },
       error: () => {
         this.drawerOpen.set(true);
@@ -3366,10 +3466,72 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.patientSchedulingOpen.set(false);
     this.patientScheduleSlots.set([]);
     this.patientScheduleSelectedSlot.set(null);
+    this.schedulePatientAfterOpen.set(false);
   }
 
   drawerPatientName() {
     return this.selectedPatient()?.name ?? (this.selectedAppointment() ? this.appointmentPatientName(this.selectedAppointment()!) : 'Paciente');
+  }
+
+  private patchPatientForms(patient: PatientRow) {
+    this.notesForm.patchValue({ administrativeNotes: patient.profile.administrativeNotes ?? '' });
+    this.patientContactForm.patchValue({
+      name: patient.name ?? '',
+      email: patient.email ?? '',
+      phone: patient.phone ?? '',
+      totalSessions: patient.profile.totalSessions ?? 0,
+    });
+  }
+
+  private openPendingPatientSchedule() {
+    if (!this.schedulePatientAfterOpen()) return;
+    this.schedulePatientAfterOpen.set(false);
+    this.openPatientSchedule();
+  }
+
+  savePatientBasics() {
+    const patient = this.selectedPatient();
+    if (!patient || this.patientContactForm.invalid) {
+      this.patientContactForm.markAllAsTouched();
+      return;
+    }
+    const value = this.patientContactForm.getRawValue();
+    this.drawerMessage.set('');
+    this.drawerError.set(false);
+    this.api
+      .patch<PatientRow>(`/patients/${patient._id}/contact`, {
+        name: value.name?.trim(),
+        email: value.email?.trim() || undefined,
+        phone: value.phone?.trim() || '',
+      })
+      .subscribe({
+        next: (updatedPatient) => {
+          this.api.patch(`/patients/${patient._id}/package`, { totalSessions: Number(value.totalSessions ?? 0) }).subscribe({
+            next: () => {
+              const mergedPatient = {
+                ...updatedPatient,
+                profile: {
+                  ...updatedPatient.profile,
+                  totalSessions: Number(value.totalSessions ?? 0),
+                },
+              };
+              this.selectedPatient.set(mergedPatient);
+              this.patchPatientForms(mergedPatient);
+              this.drawerMessage.set('Datos del paciente guardados.');
+              this.loadPatients();
+              this.refresh();
+            },
+            error: (error) => {
+              this.drawerError.set(true);
+              this.drawerMessage.set(this.apiErrorMessage(error, 'No se pudieron guardar las sesiones.'));
+            },
+          });
+        },
+        error: (error) => {
+          this.drawerError.set(true);
+          this.drawerMessage.set(this.apiErrorMessage(error, 'No se pudieron guardar los datos del paciente.'));
+        },
+      });
   }
 
   saveNotes() {
@@ -3653,28 +3815,6 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.api.post(`/appointments/${appointment._id}/cancel`, {}).subscribe(() => this.refresh());
   }
 
-  deleteAllAppointments() {
-    const firstConfirm = confirm('Esta acción borrará TODAS las citas de la base de datos. Úsala solo para pruebas. ¿Continuar?');
-    if (!firstConfirm) return;
-    const secondConfirm = prompt('Escribe BORRAR CITAS para confirmar.');
-    if (secondConfirm !== 'BORRAR CITAS') return;
-
-    this.api.delete<{ ok: boolean; deletedCount: number }>('/appointments').subscribe({
-      next: (result) => {
-        this.appointments.set([]);
-        this.drawerOpen.set(false);
-        this.selectedAppointment.set(null);
-        this.reminderError.set(false);
-        this.reminderMessage.set(`Se eliminaron ${result.deletedCount} citas de prueba.`);
-        this.refresh();
-      },
-      error: () => {
-        this.reminderError.set(true);
-        this.reminderMessage.set('No se pudieron eliminar las citas.');
-      },
-    });
-  }
-
   sendReminder(patient: InactivePatient) {
     const patientId = patient.userId?._id;
     if (!patientId) return;
@@ -3796,6 +3936,39 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     return `${date.charAt(0).toUpperCase() + date.slice(1)} · ${startTime} - ${endTime}`;
   }
 
+  nextMetricLabel(startValue: string) {
+    const date = new Date(startValue);
+    const time = date.toLocaleTimeString('es-MX', { hour: 'numeric', minute: '2-digit' });
+    const todayKey = this.formatDateKey(new Date(this.now()));
+    const dateKey = this.formatDateKey(date);
+    const tomorrow = new Date(this.now());
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowKey = this.formatDateKey(tomorrow);
+    if (dateKey === todayKey) return time;
+    if (dateKey === tomorrowKey) return `Mañana, ${time}`;
+    const day = date.toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short' });
+    return `${day}, ${time}`;
+  }
+
+  patientAppointments(patient: PatientRow) {
+    return this.sortedAppointments()
+      .filter((appointment) => appointment.patientId?._id === patient._id)
+      .sort((a, b) => {
+        const now = this.now();
+        const aTime = new Date(a.startAt).getTime();
+        const bTime = new Date(b.startAt).getTime();
+        const aUpcoming = aTime >= now && !this.inactiveAppointmentStatuses.includes(a.status);
+        const bUpcoming = bTime >= now && !this.inactiveAppointmentStatuses.includes(b.status);
+        if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1;
+        return aUpcoming ? aTime - bTime : bTime - aTime;
+      });
+  }
+
+  controlInvalid(form: { controls: Record<string, any> }, controlName: string) {
+    const control = form.controls[controlName];
+    return control?.invalid && (control.touched || control.dirty);
+  }
+
   isToday(value: string) {
     const date = new Date(value);
     const today = new Date();
@@ -3865,7 +4038,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.api.post<{ completionUrl: string; expiresAt: string }>(`/patient-invitations/${patient._id}/regenerate`, {}).subscribe({
       next: (result) => {
         this.quickIntakeResult.set({ patient, completionUrl: result.completionUrl, expiresAt: result.expiresAt });
-        this.drawerMessage.set('Link regenerado. Lo dejamos listo en Alta paciente para copiar o enviar.');
+        this.drawerMessage.set('Link regenerado. Lo dejamos listo en Registrar paciente para copiar o enviar.');
         this.selectAdminTab('quick-intake');
       },
       error: (error) => {
@@ -3878,20 +4051,6 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   private apiErrorMessage(error: any, fallback: string) {
     const message = error?.error?.message;
     return Array.isArray(message) ? message.join(' ') : message ?? fallback;
-  }
-
-  newSuggestionsCount() {
-    return this.suggestions().filter((suggestion) => suggestion.status === 'new').length;
-  }
-
-  suggestionStatusLabel(status = 'new') {
-    const labels: Record<string, string> = {
-      new: 'Nueva',
-      reviewed: 'Revisada',
-      answered: 'Respondida',
-      closed: 'Archivada',
-    };
-    return labels[status] ?? status;
   }
 
   openChatDock() {
@@ -4113,7 +4272,4 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     return labels[weekday] ?? 'día seleccionado';
   }
 
-  markSuggestionReviewed(id: string) {
-    this.api.patch(`/suggestions/${id}/status`, { status: 'reviewed' }).subscribe(() => this.loadSuggestions());
-  }
 }

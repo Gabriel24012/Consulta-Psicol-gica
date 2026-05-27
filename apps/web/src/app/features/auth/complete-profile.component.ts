@@ -19,7 +19,7 @@ interface InvitationPreview {
       <section>
         <span class="status-pill">Perfil pendiente</span>
         <h1>Completa tu perfil</h1>
-        <p>Tu nombre ya fue registrado por el consultorio. Termina tus datos para entrar al portal de paciente.</p>
+        <p>Revisa tu nombre y termina tus datos para entrar al portal de paciente.</p>
       </section>
 
       <form class="card" [formGroup]="form" (ngSubmit)="submit()">
@@ -27,7 +27,13 @@ interface InvitationPreview {
           <p class="muted-box">Validando link...</p>
         } @else {
           @if (preview(); as invitation) {
-            <label>Nombre registrado<input class="input" [value]="invitation.name" readonly></label>
+            <label>
+              Nombre
+              <input class="input" formControlName="name" autocomplete="name">
+              @if (controlInvalid('name')) {
+                <span class="field-error">Escribe tu nombre completo.</span>
+              }
+            </label>
             <label>
               Correo
               <input class="input" formControlName="email" autocomplete="email">
@@ -155,6 +161,7 @@ export class CompleteProfileComponent implements OnInit {
   private token = '';
 
   readonly form = this.fb.group({
+    name: ['', [Validators.required]],
     email: ['', [Validators.required, Validators.email]],
     phone: ['', [Validators.required, Validators.pattern(/^\s*(?:\+?52[\s.-]*)?(?:\(?\d{3}\)?[\s.-]*)\d{3}[\s.-]*\d{4}\s*$/)]],
     password: ['', [Validators.required, Validators.minLength(10)]],
@@ -176,6 +183,7 @@ export class CompleteProfileComponent implements OnInit {
           ...preview,
           expiresAt: new Date(preview.expiresAt).toLocaleString('es-MX'),
         });
+        this.form.patchValue({ name: preview.name });
         this.loading.set(false);
       },
       error: (error) => {

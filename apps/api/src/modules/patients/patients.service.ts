@@ -3,6 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { AuthUser } from '@itzel/shared';
 import { FieldCryptoService } from '../../common/crypto/field-crypto.service';
+import { UsersService } from '../users/users.service';
 import { User } from '../users/schemas/user.schema';
 import { PatientProfile } from './schemas/patient-profile.schema';
 
@@ -12,6 +13,7 @@ export class PatientsService {
     @InjectModel(PatientProfile.name) private readonly profileModel: Model<PatientProfile>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly crypto: FieldCryptoService,
+    private readonly usersService: UsersService,
   ) {}
 
   createForUser(userId: Types.ObjectId) {
@@ -80,9 +82,14 @@ export class PatientsService {
       .exec();
   }
 
-  async updatePackage(patientId: string, remainingSessions: number) {
+  async updateContact(patientId: string, input: { name?: string; email?: string; phone?: string }) {
+    await this.usersService.updatePatientContact(patientId, input);
+    return this.getPatientForViewer(patientId, { sub: patientId, name: '', email: '', role: 'admin' });
+  }
+
+  async updatePackage(patientId: string, totalSessions: number) {
     return this.profileModel
-      .findOneAndUpdate({ userId: patientId }, { remainingSessions }, { new: true })
+      .findOneAndUpdate({ userId: patientId }, { totalSessions }, { new: true })
       .exec();
   }
 

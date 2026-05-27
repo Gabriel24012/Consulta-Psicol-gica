@@ -75,6 +75,7 @@ describe('UsersService email validation', () => {
 
     await expect(
       service.completeIncompletePatient('patient-id', {
+        name: 'Paciente',
         email: '  Patient@Example.com ',
         phone: '4491234567',
         passwordHash: 'hash',
@@ -96,6 +97,7 @@ describe('UsersService email validation', () => {
 
     await expect(
       service.completeIncompletePatient('patient-id', {
+        name: 'Paciente',
         email: 'patient@example.com',
         phone: ' +52 (449) 123-4567 ',
         passwordHash: 'hash',
